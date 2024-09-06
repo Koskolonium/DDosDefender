@@ -10,8 +10,7 @@ public final class DDoSDefender extends JavaPlugin {
     @Override
     public void onEnable() {
         // Plugin startup logic
-        ConnectionRejector.setPlugin(this);
-        ConnectionPipelineInjector.inject(); // Call the inject method
+        ConnectionPipelineInjector.inject(this); // Pass the plugin instance
         Bukkit.getLogger().info("DDoSDefender has been Enabled.");
     }
 
