@@ -72,6 +72,10 @@
             <id>sonatype</id>
             <url>https://oss.sonatype.org/content/groups/public/</url>
         </repository>
+            <repository>
+                <id>jitpack.io</id>
+                <url>https://jitpack.io</url>
+            </repository>
     </repositories>
 
     <dependencies>
@@ -101,6 +105,11 @@
             <groupId>io.netty</groupId>
             <artifactId>netty-codec</artifactId>
             <version>4.1.109.Final</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.Strikeless</groupId>
+            <artifactId>MCBootstrapHook</artifactId>
+            <version>1.0.0</version>
         </dependency>
     </dependencies>
 </project>
