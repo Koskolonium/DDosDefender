@@ -1,56 +1,97 @@
 package ac.kosko.dDoSDefender.NetworkUtils;
 
-import ac.kosko.dDoSDefender.Network.ConnectionRejector;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
+import io.netty.channel.*;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NonNull;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
-import io.github.strikeless.bootstraphook.api.BootstrapHook;
 
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.List;
+import java.util.Map;
+
+import static io.github.strikeless.bootstraphook.api.util.NMSUtil.getServerChannelFutures;
+import static io.github.strikeless.bootstraphook.api.util.NMSUtil.getServerInstance;
+
+/**
+ * The main entry for the public API.
+ */
+@Data
 public class ConnectionPipelineInjector {
 
-    private static final Object lock = new Object();
-    private static boolean injected = false;
-    private static BootstrapHook bootstrapHook;
+    private static final Map<String, ChannelInitializer<Channel>> CHANNEL_INITIALIZER_MAP = new ConcurrentHashMap<>();
+    private static boolean injected;
 
-    public static void inject(JavaPlugin plugin) {
-        synchronized (lock) {
-            if (injected) {
-                return;
-            }
-            injected = true;
+    /**
+     * Registers a new {@link ChannelInitializer<Channel>} to be injected into the server's bootstrap.
+     *
+     * @param name          The name of the {@link ChannelInitializer<Channel>}.
+     * @param initializer The {@link ChannelInitializer<Channel>} to be injected.
+     */
+    public static void registerChannelInitializer(@NonNull final String name, @NonNull final ChannelInitializer<Channel> initializer) {
+        CHANNEL_INITIALIZER_MAP.put(name, initializer);
+    }
 
-            bootstrapHook = BootstrapHook.builder()
-                    .channelInitializerName("connection_rejector")
-                    .channelInitializer(new ChannelInitializer<Channel>() {
-                        @Override
-                        protected void initChannel(Channel ch) throws Exception {
-                            ChannelPipeline pipeline = ch.pipeline();
-                            if (pipeline.get("connection_rejector") == null) {
-                                pipeline.addFirst("connection_rejector", new ConnectionRejector(plugin));
-                            }
-                        }
-                    })
-                    .build();
+    /**
+     * Injects the registered {@link ChannelInitializer<Channel>}s into the server's bootstrap.
+     */
+    public static void inject() {
+        injectAcceptors();
+    }
 
+    /**
+     * Injects the {@link ChannelInitializer<Channel>} to the server's bootstrap.
+     * This'll allow ConnectionPipelineInjector to inject the {@link ChannelInitializer<Channel>}s provided by dependants.
+     * <p>
+     * This does not need to be called manually, as {@link #inject()} automatically does it.
+     */
+    public static void injectAcceptors() {
+        if (!injected) {
             try {
-                bootstrapHook.inject();
-            } catch (Exception ex) {
-                Bukkit.getLogger().severe("Failed to inject Netty handler: " + ex.getMessage());
-                ex.printStackTrace();
+                final Object nmsServer = getServerInstance();
+                final List<ChannelFuture> channelFutures = getServerChannelFutures(nmsServer);
+
+                for (final ChannelFuture channelFuture : channelFutures) {
+                    injectAcceptor(channelFuture.channel().pipeline());
+                }
+
+                injected = true;
+            } catch (ClassNotFoundException e) {
+                Bukkit.getLogger().severe("Failed to inject Netty handler: ClassNotFoundException");
+                e.printStackTrace();
+            } catch (NoSuchFieldException e) {
+                Bukkit.getLogger().severe("Failed to inject Netty handler: NoSuchFieldException");
+                e.printStackTrace();
+            } catch (IllegalAccessException e) {
+                Bukkit.getLogger().severe("Failed to inject Netty handler: IllegalAccessException");
+                e.printStackTrace();
             }
         }
     }
 
-    public static void remove() {
-        synchronized (lock) {
-            if (!injected) {
-                return;
-            }
-            injected = false;
+    /**
+     * Injects the {@link ChannelInitializer<Channel>} to the given server's {@link ChannelPipeline}.
+     *
+     * @param serverChannelPipeline The {@link ChannelPipeline} which the {@link ChannelInitializer<Channel>}
+     *                              will be added to.
+     */
+    private static void injectAcceptor(final ChannelPipeline serverChannelPipeline) {
+        // We must add to the first position as ServerBootstrapAcceptor doesn't forward the event.
+        serverChannelPipeline.addFirst("ConnectionPipelineInjectorAcceptor", new ChannelInboundHandlerAdapter() {
 
-            bootstrapHook.eject();
-        }
+            @Override
+            public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+                // Forward the event to other handlers before processing this ourselves.
+                super.channelRead(ctx, msg);
+
+                final Channel childChannel = (Channel) msg;
+
+                // Add the ChannelInitializers to the client's/child's pipeline.
+                CHANNEL_INITIALIZER_MAP.forEach((name, initializer) -> {
+                    childChannel.pipeline().addLast(name, initializer);
+                });
+            }
+        });
     }
 }
