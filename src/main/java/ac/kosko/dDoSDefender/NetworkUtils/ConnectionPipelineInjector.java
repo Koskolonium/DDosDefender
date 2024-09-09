@@ -1,91 +1,88 @@
 package ac.kosko.dDoSDefender.NetworkUtils;
 
 import io.netty.channel.*;
-import lombok.Builder;
 import lombok.Data;
 import lombok.NonNull;
 import org.bukkit.Bukkit;
-import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
 import java.util.Map;
 
-
 /**
- * The main entry for the public API.
+ * This class is responsible for managing and injecting custom network handlers
+ * into the server's connection pipeline. It allows the plugin to intercept
+ * new player connections and apply custom logic before they reach the server.
  */
 @Data
 public class ConnectionPipelineInjector {
 
+    // A thread-safe map to store the different network handlers (ChannelInitializers) to be injected.
     private static final Map<String, ChannelInitializer<Channel>> CHANNEL_INITIALIZER_MAP = new ConcurrentHashMap<>();
     private static boolean injected;
 
     /**
-     * Registers a new {@link ChannelInitializer<Channel>} to be injected into the server's bootstrap.
+     * Registers a new custom network handler (ChannelInitializer) to be added
+     * to the server's connection pipeline.
      *
-     * @param name          The name of the {@link ChannelInitializer<Channel>}.
-     * @param initializer The {@link ChannelInitializer<Channel>} to be injected.
+     * @param name A unique identifier for this handler.
+     * @param initializer The custom network handler (ChannelInitializer).
      */
     public static void registerChannelInitializer(@NonNull final String name, @NonNull final ChannelInitializer<Channel> initializer) {
         CHANNEL_INITIALIZER_MAP.put(name, initializer);
     }
 
     /**
-     * Injects the registered {@link ChannelInitializer<Channel>}s into the server's bootstrap.
+     * Injects all registered custom network handlers into the server's pipeline.
+     * This process will allow the plugin to apply custom logic during player connection.
      */
     public static void inject() {
-        injectAcceptors();
+        injectAcceptors(); // Injects the custom handlers into the network pipeline.
     }
 
     /**
-     * Injects the {@link ChannelInitializer<Channel>} to the server's bootstrap.
-     * This'll allow ConnectionPipelineInjector to inject the {@link ChannelInitializer<Channel>}s provided by dependants.
-     * <p>
-     * This does not need to be called manually, as {@link #inject()} automatically does it.
+     * Finds the connection entry points in the server and injects the custom handlers there.
+     * This ensures the plugin can intercept connections at the earliest stage.
      */
     public static void injectAcceptors() {
         if (!injected) {
             try {
+                // Get the internal Minecraft server instance.
                 final Object nmsServer = NMSUtil.getServerInstance();
+                // Retrieve the list of active connection channels (ChannelFutures).
                 final List<ChannelFuture> channelFutures = NMSUtil.getServerChannelFutures(nmsServer);
 
+                // Inject the custom handlers into the pipeline of each channel.
                 for (final ChannelFuture channelFuture : channelFutures) {
                     injectAcceptor(channelFuture.channel().pipeline());
                 }
 
-                injected = true;
-            } catch (ClassNotFoundException e) {
-                Bukkit.getLogger().severe("Failed to inject Netty handler: ClassNotFoundException");
-                e.printStackTrace();
-            } catch (NoSuchFieldException e) {
-                Bukkit.getLogger().severe("Failed to inject Netty handler: NoSuchFieldException");
-                e.printStackTrace();
-            } catch (IllegalAccessException e) {
-                Bukkit.getLogger().severe("Failed to inject Netty handler: IllegalAccessException");
+                injected = true; // Mark the injection as completed.
+            } catch (ClassNotFoundException | NoSuchFieldException | IllegalAccessException e) {
+                Bukkit.getLogger().severe("Failed to inject Netty handler: " + e.getClass().getSimpleName());
                 e.printStackTrace();
             }
         }
     }
 
     /**
-     * Injects the {@link ChannelInitializer<Channel>} to the given server's {@link ChannelPipeline}.
+     * Adds the custom handlers (from the initializer map) to the given channel's pipeline.
      *
-     * @param serverChannelPipeline The {@link ChannelPipeline} which the {@link ChannelInitializer<Channel>}
-     *                              will be added to.
+     * @param serverChannelPipeline The network pipeline where handlers will be added.
      */
     private static void injectAcceptor(final ChannelPipeline serverChannelPipeline) {
-        // We must add to the first position as ServerBootstrapAcceptor doesn't forward the event.
+        // Insert a new handler at the very beginning of the pipeline.
         serverChannelPipeline.addFirst("ConnectionPipelineInjectorAcceptor", new ChannelInboundHandlerAdapter() {
 
             @Override
             public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-                // Forward the event to other handlers before processing this ourselves.
+                // Let other handlers process the event before applying our custom logic.
                 super.channelRead(ctx, msg);
 
+                // The 'childChannel' represents an individual connection.
                 final Channel childChannel = (Channel) msg;
 
-                // Add the ChannelInitializers to the client's/child's pipeline.
+                // Add all custom handlers from the map to this new connection's pipeline.
                 CHANNEL_INITIALIZER_MAP.forEach((name, initializer) -> {
                     childChannel.pipeline().addLast(name, initializer);
                 });
