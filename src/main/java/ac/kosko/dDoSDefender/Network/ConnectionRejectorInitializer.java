@@ -1,14 +1,28 @@
 package ac.kosko.dDoSDefender.Network;
 
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.*;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class ConnectionRejector extends ChannelInboundHandlerAdapter {
+public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
+
+    private final JavaPlugin plugin;
+
+    public ConnectionRejectorInitializer(JavaPlugin plugin) {
+        this.plugin = plugin;
+    }
+
+    @Override
+    protected void initChannel(Channel ch) throws Exception {
+        ChannelPipeline pipeline = ch.pipeline();
+        pipeline.addLast(new ConnectionRejector(plugin));
+    }
+}
+
+class ConnectionRejector extends ChannelInboundHandlerAdapter {
 
     private static final int MAX_CONNECTIONS_PER_SECOND = 20;
     private final Semaphore semaphore = new Semaphore(MAX_CONNECTIONS_PER_SECOND);
