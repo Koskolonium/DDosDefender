@@ -11,8 +11,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static io.github.strikeless.bootstraphook.api.util.NMSUtil.getServerChannelFutures;
-import static io.github.strikeless.bootstraphook.api.util.NMSUtil.getServerInstance;
 
 /**
  * The main entry for the public API.
@@ -49,8 +47,8 @@ public class ConnectionPipelineInjector {
     public static void injectAcceptors() {
         if (!injected) {
             try {
-                final Object nmsServer = getServerInstance();
-                final List<ChannelFuture> channelFutures = getServerChannelFutures(nmsServer);
+                final Object nmsServer = NMSUtil.getServerInstance();
+                final List<ChannelFuture> channelFutures = NMSUtil.getServerChannelFutures(nmsServer);
 
                 for (final ChannelFuture channelFuture : channelFutures) {
                     injectAcceptor(channelFuture.channel().pipeline());
