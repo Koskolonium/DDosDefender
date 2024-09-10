@@ -1,11 +1,11 @@
 package ac.kosko.dDoSDefender.NetworkUtils;
 
+import org.bukkit.Bukkit;
+
 import java.lang.reflect.Field;
 import java.util.List;
-
 import io.netty.channel.ChannelFuture;
 import lombok.experimental.UtilityClass;
-import org.bukkit.Bukkit;
 
 /**
  * Utility class that helps access Minecraft's internal server objects using reflection.
@@ -16,9 +16,11 @@ public class NMSUtil {
 
     // Base package for Minecraft server classes, depending on the Minecraft version.
     private static final String OBC_PACKAGE = Bukkit.getServer().getClass().getPackage().getName();
-    private static final String OBC_VERSION_STRING = OBC_PACKAGE.split("\\.")[3];
-    private static final boolean USE_MODERN_NMS_NAMES = OBC_VERSION_STRING.isEmpty() || Integer.parseInt(OBC_VERSION_STRING.split("_")[1]) >= 17;
-    private static final String NMS_PACKAGE = "net.minecraft.server" + (USE_MODERN_NMS_NAMES ? "" : "." + OBC_VERSION_STRING);
+    private static final String OBC_VERSION_STRING = OBC_PACKAGE.split("\\.").length > 3 ? OBC_PACKAGE.split("\\.")[3] : "";
+    private static final boolean USE_MODERN_NMS_NAMES = OBC_VERSION_STRING.isEmpty() || parseVersion(OBC_VERSION_STRING) >= 18; // 1.18+
+
+    // Minecraft 1.17+ and later versions dropped the 'net.minecraft.server.VERSION' structure.
+    private static final String NMS_PACKAGE = USE_MODERN_NMS_NAMES ? "net.minecraft.server" : "net.minecraft.server." + OBC_VERSION_STRING;
 
     /**
      * Retrieves a specific Minecraft server class using either its modern or legacy name, depending on the server version.
@@ -39,9 +41,9 @@ public class NMSUtil {
      * @throws ClassNotFoundException, NoSuchFieldException, IllegalAccessException If reflection fails.
      */
     public Object getServerInstance() throws ClassNotFoundException, NoSuchFieldException, IllegalAccessException {
-        final Class<?> klass = getNMSClass("MinecraftServer", "MinecraftServer");
-        final Field field = ReflectiveUtil.getFieldByType(klass, klass);
-        return ReflectiveUtil.getFieldValue(null, field);
+        final Class<?> minecraftServerClass = getNMSClass("MinecraftServer", "MinecraftServer");
+        final Field serverField = ReflectiveUtil.getFieldByType(minecraftServerClass, minecraftServerClass);
+        return ReflectiveUtil.getFieldValue(null, serverField); // static field, so pass 'null'
     }
 
     /**
@@ -58,5 +60,20 @@ public class NMSUtil {
 
         final Field channelFuturesField = ReflectiveUtil.getFieldByType(serverConnection.getClass(), List.class);
         return ReflectiveUtil.getFieldValue(serverConnection, channelFuturesField);
+    }
+
+    /**
+     * Parses the version string to get the major version number.
+     *
+     * @param versionString The version string from the package.
+     * @return The major version number, or -1 if parsing fails.
+     */
+    private int parseVersion(String versionString) {
+        try {
+            String[] parts = versionString.split("_");
+            return parts.length > 1 ? Integer.parseInt(parts[1]) : -1;
+        } catch (NumberFormatException e) {
+            return -1; // If the version can't be parsed, return -1.
+        }
     }
 }

@@ -22,7 +22,10 @@ public class ReflectiveUtil {
      */
     public Field getFieldByType(final Class<?> klass, final Class<?> type) throws NoSuchFieldException {
         for (final Field field : getInheritedDeclaredFields(klass)) {
-            if (type.isAssignableFrom(field.getType())) return field;
+            if (type.isAssignableFrom(field.getType())) {
+                field.setAccessible(true); // Ensure private fields can be accessed
+                return field;
+            }
         }
 
         throw new NoSuchFieldException("Type: " + type.getName());
