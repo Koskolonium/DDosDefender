@@ -15,8 +15,9 @@ public final class DDoSDefender extends JavaPlugin {
     @Override
     public void onEnable() {
         // Register the custom network handler for rejecting connections
-        // and inject it into the server's network pipeline.
         ConnectionPipelineInjector.registerChannelInitializer("ConnectionRejector", new ConnectionRejectorInitializer(this));
+
+        // Inject the custom handlers into the server's network pipeline.
         ConnectionPipelineInjector.inject();
 
         // Log a message indicating that the plugin is now active.

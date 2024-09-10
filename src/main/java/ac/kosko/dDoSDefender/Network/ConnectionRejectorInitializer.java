@@ -4,6 +4,7 @@ import io.netty.channel.*;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -21,9 +22,9 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
 
     @Override
     protected void initChannel(Channel ch) throws Exception {
-        // Add the ConnectionRejector to the pipeline of this new connection.
+        // Add the ConnectionRejector as the first handler in the pipeline
         ChannelPipeline pipeline = ch.pipeline();
-        pipeline.addLast(new ConnectionRejector(plugin));
+        pipeline.addFirst("connectionRejector", new ConnectionRejector(plugin));
     }
 }
 
@@ -34,40 +35,33 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
  */
 class ConnectionRejector extends ChannelInboundHandlerAdapter {
 
-    // The maximum number of connections allowed per second.
     private static final int MAX_CONNECTIONS_PER_SECOND = 20;
-
-    // A semaphore to manage the available "slots" for new connections.
-    private final Semaphore semaphore = new Semaphore(MAX_CONNECTIONS_PER_SECOND);
-
-    // An atomic counter to track the number of connections in the current second.
-    private final AtomicInteger connectionCounter = new AtomicInteger(0);
-
     private final JavaPlugin plugin;
+    private final ConcurrentHashMap<Long, AtomicInteger> connectionCounts = new ConcurrentHashMap<>();
 
     public ConnectionRejector(JavaPlugin plugin) {
         this.plugin = plugin;
 
-        // Schedule a task to reset the connection counter and the semaphore every second.
+        // Schedule a task to reset the connection counts every second
         Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, () -> {
             try {
-                connectionCounter.set(0); // Reset the connection count.
-                semaphore.drainPermits(); // Remove all permits.
-                semaphore.release(MAX_CONNECTIONS_PER_SECOND); // Refill the semaphore to its max capacity.
+                long currentSecond = System.currentTimeMillis() / 1000;
+                connectionCounts.remove(currentSecond - 1); // Remove previous second's count
             } catch (Exception e) {
                 e.printStackTrace();
             }
-        }, 20L, 20L); // Run every 20 ticks, which is equivalent to 1 second in Minecraft.
+        }, 20L, 20L); // Run every 20 ticks, which is equivalent to 1 second in Minecraft
     }
 
     @Override
     public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
-        // If a permit is available (i.e., less than MAX_CONNECTIONS_PER_SECOND), allow the connection.
-        if (semaphore.tryAcquire()) {
-            connectionCounter.incrementAndGet(); // Increment the connection count.
-            super.channelRegistered(ctx); // Proceed with the connection.
+        long currentSecond = System.currentTimeMillis() / 1000;
+        AtomicInteger connectionCount = connectionCounts.computeIfAbsent(currentSecond, k -> new AtomicInteger(0));
+        if (connectionCount.incrementAndGet() <= MAX_CONNECTIONS_PER_SECOND) {
+            Bukkit.getLogger().info("Connection accepted from " + ctx.channel().remoteAddress());
+            super.channelRegistered(ctx); // Proceed with the connection
         } else {
-            // Reject the connection immediately if the limit is exceeded.
+            Bukkit.getLogger().info("Connection rejected from " + ctx.channel().remoteAddress() + " due to rate limit exceeded.");
             ctx.close();
         }
     }
@@ -76,8 +70,12 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
     public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
         super.channelUnregistered(ctx);
         try {
-            // Release a permit when the connection is closed to allow new connections.
-            semaphore.release();
+            long currentSecond = System.currentTimeMillis() / 1000;
+            AtomicInteger connectionCount = connectionCounts.get(currentSecond);
+            if (connectionCount != null) {
+                connectionCount.decrementAndGet();
+            }
+            Bukkit.getLogger().info("Connection closed from " + ctx.channel().remoteAddress());
         } catch (Exception e) {
             e.printStackTrace();
         }

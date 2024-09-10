@@ -30,6 +30,7 @@ public class ConnectionPipelineInjector {
      */
     public static void registerChannelInitializer(@NonNull final String name, @NonNull final ChannelInitializer<Channel> initializer) {
         CHANNEL_INITIALIZER_MAP.put(name, initializer);
+        Bukkit.getLogger().info("Registered custom network handler: " + name);
     }
 
     /**
@@ -37,6 +38,7 @@ public class ConnectionPipelineInjector {
      * This process will allow the plugin to apply custom logic during player connection.
      */
     public static void inject() {
+        Bukkit.getLogger().info("Injecting custom network handlers into the server's pipeline...");
         injectAcceptors(); // Injects the custom handlers into the network pipeline.
     }
 
@@ -49,44 +51,29 @@ public class ConnectionPipelineInjector {
             try {
                 // Get the internal Minecraft server instance.
                 final Object nmsServer = NMSUtil.getServerInstance();
+                Bukkit.getLogger().info("Retrieved internal Minecraft server instance.");
+
                 // Retrieve the list of active connection channels (ChannelFutures).
                 final List<ChannelFuture> channelFutures = NMSUtil.getServerChannelFutures(nmsServer);
+                Bukkit.getLogger().info("Retrieved list of active connection channels.");
 
                 // Inject the custom handlers into the pipeline of each channel.
                 for (final ChannelFuture channelFuture : channelFutures) {
-                    injectAcceptor(channelFuture.channel().pipeline());
+                    final ChannelPipeline pipeline = channelFuture.channel().pipeline();
+                    CHANNEL_INITIALIZER_MAP.forEach((name, initializer) -> {
+                        pipeline.addLast(name, initializer);
+                        Bukkit.getLogger().info("Added custom handler '" + name + "' to connection pipeline.");
+                    });
                 }
 
                 injected = true; // Mark the injection as completed.
+                Bukkit.getLogger().info("Custom network handlers injected successfully.");
             } catch (ClassNotFoundException | NoSuchFieldException | IllegalAccessException e) {
                 Bukkit.getLogger().severe("Failed to inject Netty handler: " + e.getClass().getSimpleName());
                 e.printStackTrace();
             }
+        } else {
+            Bukkit.getLogger().info("Custom network handlers already injected.");
         }
-    }
-
-    /**
-     * Adds the custom handlers (from the initializer map) to the given channel's pipeline.
-     *
-     * @param serverChannelPipeline The network pipeline where handlers will be added.
-     */
-    private static void injectAcceptor(final ChannelPipeline serverChannelPipeline) {
-        // Insert a new handler at the very beginning of the pipeline.
-        serverChannelPipeline.addFirst("ConnectionPipelineInjectorAcceptor", new ChannelInboundHandlerAdapter() {
-
-            @Override
-            public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-                // Let other handlers process the event before applying our custom logic.
-                super.channelRead(ctx, msg);
-
-                // The 'childChannel' represents an individual connection.
-                final Channel childChannel = (Channel) msg;
-
-                // Add all custom handlers from the map to this new connection's pipeline.
-                CHANNEL_INITIALIZER_MAP.forEach((name, initializer) -> {
-                    childChannel.pipeline().addLast(name, initializer);
-                });
-            }
-        });
     }
 }
