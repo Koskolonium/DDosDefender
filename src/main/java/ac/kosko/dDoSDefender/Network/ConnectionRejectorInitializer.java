@@ -47,10 +47,9 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
     public ConnectionRejector(JavaPlugin plugin) {
         this.plugin = plugin;
 
-        // Enable debug logging for Netty
+        // debug logging for Netty
         InternalLoggerFactory.setDefaultFactory(Log4J2LoggerFactory.INSTANCE);
 
-        // Register ProtocolLib listener for LoginStart packets
         ProtocolLibrary.getProtocolManager().addPacketListener(new PacketAdapter(plugin, ListenerPriority.HIGHEST, PacketType.Login.Client.START) {
             @Override
             public void onPacketReceiving(PacketEvent event) {
