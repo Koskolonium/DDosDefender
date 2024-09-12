@@ -1,17 +1,24 @@
 package ac.kosko.dDoSDefender.Network;
 
-import io.netty.channel.*;
+import com.comphenix.protocol.PacketType;
+import com.comphenix.protocol.ProtocolLibrary;
+import com.comphenix.protocol.events.ListenerPriority;
+import com.comphenix.protocol.events.PacketAdapter;
+import com.comphenix.protocol.events.PacketEvent;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelPipeline;
 import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
+import io.netty.util.internal.logging.InternalLoggerFactory;
+import io.netty.util.internal.logging.Log4J2LoggerFactory;
 
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * This class is responsible for initializing the ConnectionRejector and adding it to each new connection's pipeline.
- * It ensures that the ConnectionRejector is correctly placed to limit incoming connection attempts.
- */
 public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
 
     private final JavaPlugin plugin;
@@ -22,62 +29,113 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
 
     @Override
     protected void initChannel(Channel ch) throws Exception {
-        // Add the ConnectionRejector as the first handler in the pipeline
         ChannelPipeline pipeline = ch.pipeline();
         pipeline.addFirst("connectionRejector", new ConnectionRejector(plugin));
+        Bukkit.getLogger().info("ConnectionRejector has been added to the pipeline.");
     }
 }
 
-/**
- * This class limits the number of connection attempts to the server per second.
- * It uses a Semaphore to keep track of available connection slots and rejects any
- * connection attempt that exceeds the allowed number of connections per second.
- */
 class ConnectionRejector extends ChannelInboundHandlerAdapter {
 
-    private static final int MAX_CONNECTIONS_PER_SECOND = 20;
+    private static final int MAX_QUEUE_SIZE = 9;
+    private static final int PROCESS_LIMIT = 3;
+
     private final JavaPlugin plugin;
-    private final ConcurrentHashMap<Long, AtomicInteger> connectionCounts = new ConcurrentHashMap<>();
+    private final ConcurrentLinkedQueue<PacketEvent> playerQueue = new ConcurrentLinkedQueue<>();
+    private final Semaphore queueLock = new Semaphore(1);
 
     public ConnectionRejector(JavaPlugin plugin) {
         this.plugin = plugin;
 
-        // Schedule a task to reset the connection counts every second
-        Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, () -> {
-            try {
-                long currentSecond = System.currentTimeMillis() / 1000;
-                connectionCounts.remove(currentSecond - 1); // Remove previous second's count
-            } catch (Exception e) {
-                e.printStackTrace();
+        // Enable debug logging for Netty
+        InternalLoggerFactory.setDefaultFactory(Log4J2LoggerFactory.INSTANCE);
+
+        // Register ProtocolLib listener for LoginStart packets
+        ProtocolLibrary.getProtocolManager().addPacketListener(new PacketAdapter(plugin, ListenerPriority.HIGHEST, PacketType.Login.Client.START) {
+            @Override
+            public void onPacketReceiving(PacketEvent event) {
+                Bukkit.getLogger().info("Received LoginStart packet: " + event.getPacketType());
+                handlePlayerConnection(event);
             }
-        }, 20L, 20L); // Run every 20 ticks, which is equivalent to 1 second in Minecraft
+        });
+
+        // Schedule task to process player connection requests every second
+        Bukkit.getScheduler().runTaskTimer(plugin, this::processQueue, 20L, 20L);
+        Bukkit.getLogger().info("ConnectionRejector scheduled to process queue every second.");
+    }
+
+    private boolean isPlayerConnection(PacketEvent event) {
+        Player player = event.getPlayer();
+        Bukkit.getLogger().info("Checking if packet is from player: " + player);
+        return player != null;
+    }
+
+    private void handlePlayerConnection(PacketEvent event) {
+        Bukkit.getLogger().info("Received LoginStart packet from: " + event.getPlayer().getName());
+        queueLock.acquireUninterruptibly();
+        try {
+            if (playerQueue.size() < MAX_QUEUE_SIZE) {
+                if (event.getPacket() != null) {
+                    playerQueue.add(event);
+                    event.setCancelled(true); // Hold the connection until processed
+                    Bukkit.getLogger().info("Added packet to queue. Queue size: " + playerQueue.size());
+                } else {
+                    Bukkit.getLogger().warning("Invalid packet data. Packet from " + event.getPlayer().getName() + " was rejected.");
+                    event.setCancelled(true);
+                }
+            } else {
+                Bukkit.getLogger().warning("Connection queue is full. Packet from " + event.getPlayer().getName() + " was rejected.");
+                event.setCancelled(true);
+            }
+        } finally {
+            queueLock.release();
+        }
+    }
+
+    private void processQueue() {
+        Bukkit.getLogger().info("Processing connection queue. Queue size: " + playerQueue.size());
+        queueLock.acquireUninterruptibly();
+        try {
+            int processedCount = 0;
+            while (processedCount < PROCESS_LIMIT && !playerQueue.isEmpty()) {
+                PacketEvent packetEvent = playerQueue.poll();
+                if (packetEvent != null) {
+                    packetEvent.setCancelled(false); // Uncancel the event to allow login to continue
+                    processedCount++;
+                }
+            }
+        } finally {
+            queueLock.release();
+        }
     }
 
     @Override
     public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
-        long currentSecond = System.currentTimeMillis() / 1000;
-        AtomicInteger connectionCount = connectionCounts.computeIfAbsent(currentSecond, k -> new AtomicInteger(0));
-        if (connectionCount.incrementAndGet() <= MAX_CONNECTIONS_PER_SECOND) {
-            Bukkit.getLogger().info("Connection accepted from " + ctx.channel().remoteAddress());
-            super.channelRegistered(ctx); // Proceed with the connection
-        } else {
-            Bukkit.getLogger().info("Connection rejected from " + ctx.channel().remoteAddress() + " due to rate limit exceeded.");
-            ctx.close();
-        }
+        Bukkit.getLogger().info("Channel registered: " + ctx.channel().toString());
+        super.channelRegistered(ctx);
     }
 
     @Override
     public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
+        Bukkit.getLogger().info("Channel unregistered: " + ctx.channel().toString());
         super.channelUnregistered(ctx);
-        try {
-            long currentSecond = System.currentTimeMillis() / 1000;
-            AtomicInteger connectionCount = connectionCounts.get(currentSecond);
-            if (connectionCount != null) {
-                connectionCount.decrementAndGet();
-            }
-            Bukkit.getLogger().info("Connection closed from " + ctx.channel().remoteAddress());
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+    }
+
+    @Override
+    public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        Bukkit.getLogger().info("Channel active: " + ctx.channel().toString());
+        super.channelActive(ctx);
+    }
+
+    @Override
+    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+        Bukkit.getLogger().info("Channel inactive: " + ctx.channel().toString());
+        super.channelInactive(ctx);
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        Bukkit.getLogger().severe("Exception caught: " + cause.getMessage());
+        super.exceptionCaught(ctx, cause);
     }
 }
