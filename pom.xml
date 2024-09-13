@@ -52,8 +52,12 @@
                             </relocations>
                             <artifactSet>
                                 <includes>
-                                    <include>*:*</include>
+                                    <include>com.comphenix.protocol:ProtocolLib</include>
+                                    <include>io.netty:*</include>
                                 </includes>
+                                <excludes>
+                                    <exclude>org.spigotmc:spigot-api</exclude>
+                                </excludes>
                             </artifactSet>
                         </configuration>
                     </execution>
@@ -121,7 +125,7 @@
             <version>1.18.34</version>
             <scope>provided</scope>
         </dependency>
-        <!-- ProtocolLib dependency without provided scope -->
+        <!-- ProtocolLib dependency included in the final jar -->
         <dependency>
             <groupId>com.comphenix.protocol</groupId>
             <artifactId>ProtocolLib</artifactId>
