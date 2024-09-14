@@ -9,6 +9,7 @@ import com.comphenix.protocol.events.PacketContainer;
 import io.netty.channel.*;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
+
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Semaphore;
@@ -54,9 +55,9 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
     private final JavaPlugin plugin; // Reference to the plugin instance.
     private final Semaphore queueLock = new Semaphore(1); // Ensures thread-safe access to the playerQueue.
     private final ConcurrentLinkedQueue<QueuedPacket> playerQueue = new ConcurrentLinkedQueue<>(); // Queue for storing player connection requests.
-    private final AtomicInteger packetCounter = new AtomicInteger(0); // Tracks the number of processed packets.
+    private final AtomicInteger packetCounter = new AtomicInteger(); // Tracks the number of processed packets.
     private final ConcurrentHashMap<Integer, LoginStartData> packetData = new ConcurrentHashMap<>(); // Stores data of queued Login Start packets.
-    private final AtomicInteger loginStartCount = new AtomicInteger(0); // Tracks how many Login Start packets are received per second.
+    private final AtomicInteger packetCountInCurrentSecond = new AtomicInteger(); // Counts packets received in the current second.
 
     /**
      * Constructor that initializes the ProtocolLib packet listener and schedules tasks for the queue processing.
@@ -77,7 +78,7 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
         // Schedule a task that processes queued player connections every second.
         Bukkit.getScheduler().runTaskTimer(plugin, this::processQueue, 20L, 20L);
 
-        // Schedule a task that resets the loginStartCount and warns if too many Login Start packets are received.
+        // Schedule a task that resets the packet count every second and logs a warning if too many packets are received.
         Bukkit.getScheduler().runTaskTimer(plugin, this::resetAndWarnPacketCount, 20L, 20L);
     }
 
@@ -124,29 +125,26 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
      * @param event The packet event representing the player's connection attempt.
      */
     private void handlePlayerConnection(PacketEvent event) {
-        queueLock.acquireUninterruptibly();
+        queueLock.acquireUninterruptibly(); // Ensure exclusive access to the queue.
         try {
-            if (playerQueue.size() < MAX_QUEUE_SIZE) {
+            if (playerQueue.size() < MAX_QUEUE_SIZE) { // Check if there's space in the queue.
                 int packetId = packetCounter.incrementAndGet(); // Generate a unique packet ID.
-                LoginStartData data = extractLoginStartData(event.getPacket()); // Extract the player's data.
+                LoginStartData data = extractLoginStartData(event.getPacket()); // Extract the player's data from the packet.
                 if (data != null) {
-                    packetData.put(packetId, data); // Store the extracted data.
+                    packetData.put(packetId, data); // Store the extracted data in the map.
                     playerQueue.add(new QueuedPacket(event, packetId)); // Add the packet to the queue.
-                    event.setCancelled(true); // Hold the connection until processed.
-                } else {
-                    event.setCancelled(true); // Cancel the connection if data extraction fails.
-                }
+                    event.setCancelled(true); // Cancel the packet to hold the connection until processed.
 
-                // Increment the loginStartCount and check for threshold warnings.
-                int currentCount = loginStartCount.incrementAndGet();
-                if (currentCount > 50) {
-                    Bukkit.getLogger().warning("More than 50 Login Start packets received in the last second."); // Warn if more than 50 packets received in a second.
+                    // Increment the packet count for the current second.
+                    packetCountInCurrentSecond.incrementAndGet();
+                } else {
+                    event.setCancelled(true); // Cancel the packet if data extraction fails.
                 }
             } else {
-                event.setCancelled(true); // Cancel the connection if the queue is full.
+                event.setCancelled(true); // Cancel the packet if the queue is full.
             }
         } finally {
-            queueLock.release();
+            queueLock.release(); // Release the lock to allow other threads to access the queue.
         }
     }
 
@@ -165,19 +163,19 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
             }
             return null;
         } catch (Exception e) {
-            return null;
+            return null; // Return null if extraction fails.
         }
     }
 
     /**
      * Processes the player connection queue and sends packets for further processing.
-     * Processes a maximum of 2 player connections per second.
+     * Processes a maximum of 3 player connections per second.
      */
     private void processQueue() {
-        queueLock.acquireUninterruptibly();
+        queueLock.acquireUninterruptibly(); // Ensure exclusive access to the queue.
         try {
             int processedCount = 0; // Tracks the number of processed packets.
-            while (processedCount < PROCESS_LIMIT && !playerQueue.isEmpty()) {
+            while (processedCount < PROCESS_LIMIT && !playerQueue.isEmpty()) { // Process up to PROCESS_LIMIT packets.
                 QueuedPacket queuedPacket = playerQueue.poll(); // Retrieve the next packet from the queue.
                 if (queuedPacket != null) {
                     int packetId = queuedPacket.getPacketId();
@@ -191,46 +189,24 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
                         try {
                             ProtocolLibrary.getProtocolManager().receiveClientPacket(packetEvent.getPlayer(), packet, false);
                             processedCount++;
-                        } catch (Exception ignored) {
-                            // In case of exceptions, the packet processing is skipped.
+                        } catch (Exception e) {
+                            Bukkit.getLogger().warning("Failed to process packet: " + e.getMessage()); // Log a warning if packet processing fails.
                         }
                     }
                 }
             }
         } finally {
-            queueLock.release();
+            queueLock.release(); // Release the lock to allow other threads to access the queue.
         }
     }
 
     /**
-     * Resets the loginStartCount every second and logs a warning if more than 50 packets were received.
+     * Resets the packet count every second and logs a warning if more than 50 packets were received.
      */
     private void resetAndWarnPacketCount() {
-        loginStartCount.set(0); // Reset the counter every second.
-    }
-
-    @Override
-    public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
-        super.channelRegistered(ctx); // Called when a new channel is registered.
-    }
-
-    @Override
-    public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
-        super.channelUnregistered(ctx); // Called when a channel is unregistered.
-    }
-
-    @Override
-    public void channelActive(ChannelHandlerContext ctx) throws Exception {
-        super.channelActive(ctx); // Called when a channel becomes active.
-    }
-
-    @Override
-    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-        super.channelInactive(ctx); // Called when a channel becomes inactive.
-    }
-
-    @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        super.exceptionCaught(ctx, cause); // Handle exceptions in the channel.
+        int count = packetCountInCurrentSecond.getAndSet(0); // Get and reset the packet count.
+        if (count > 50) {
+            Bukkit.getLogger().warning("More than 50 Login Start packets received in the last second.");
+        }
     }
 }
