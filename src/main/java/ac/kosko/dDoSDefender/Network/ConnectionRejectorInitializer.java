@@ -206,7 +206,7 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
     private void resetAndWarnPacketCount() {
         int count = packetCountInCurrentSecond.getAndSet(0); // Get and reset the packet count.
         if (count > 50) {
-            Bukkit.getLogger().warning("More than 50 Login Start packets received in the last second.");
+            Bukkit.getLogger().warning("Possible DDoS Attack In Progress Beware!!.");
         }
     }
 }
