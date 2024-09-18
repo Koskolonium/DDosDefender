@@ -13,13 +13,9 @@ import lombok.experimental.UtilityClass;
  */
 @UtilityClass
 public class NMSUtil {
-
-    // Base package for Minecraft server classes, depending on the Minecraft version.
     private static final String OBC_PACKAGE = Bukkit.getServer().getClass().getPackage().getName();
     private static final String OBC_VERSION_STRING = OBC_PACKAGE.split("\\.").length > 3 ? OBC_PACKAGE.split("\\.")[3] : "";
     private static final boolean USE_MODERN_NMS_NAMES = OBC_VERSION_STRING.isEmpty() || parseVersion(OBC_VERSION_STRING) >= 18; // 1.18+
-
-    // Minecraft 1.17+ and later versions dropped the 'net.minecraft.server.VERSION' structure.
     private static final String NMS_PACKAGE = USE_MODERN_NMS_NAMES ? "net.minecraft.server" : "net.minecraft.server." + OBC_VERSION_STRING;
 
     /**
@@ -43,7 +39,7 @@ public class NMSUtil {
     public Object getServerInstance() throws ClassNotFoundException, NoSuchFieldException, IllegalAccessException {
         final Class<?> minecraftServerClass = getNMSClass("MinecraftServer", "MinecraftServer");
         final Field serverField = ReflectiveUtil.getFieldByType(minecraftServerClass, minecraftServerClass);
-        return ReflectiveUtil.getFieldValue(null, serverField); // static field, so pass 'null'
+        return ReflectiveUtil.getFieldValue(null, serverField);
     }
 
     /**
@@ -73,7 +69,7 @@ public class NMSUtil {
             String[] parts = versionString.split("_");
             return parts.length > 1 ? Integer.parseInt(parts[1]) : -1;
         } catch (NumberFormatException e) {
-            return -1; // If the version can't be parsed, return -1.
+            return -1;
         }
     }
 }

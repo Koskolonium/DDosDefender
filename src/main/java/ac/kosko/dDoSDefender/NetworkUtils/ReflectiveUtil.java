@@ -23,7 +23,7 @@ public class ReflectiveUtil {
     public Field getFieldByType(final Class<?> klass, final Class<?> type) throws NoSuchFieldException {
         for (final Field field : getInheritedDeclaredFields(klass)) {
             if (type.isAssignableFrom(field.getType())) {
-                field.setAccessible(true); // Ensure private fields can be accessed
+                field.setAccessible(true);
                 return field;
             }
         }
@@ -40,7 +40,7 @@ public class ReflectiveUtil {
      * @throws IllegalAccessException If reflection fails due to access control.
      */
     public <T> T getFieldValue(final Object object, final Field field) throws IllegalAccessException {
-        field.setAccessible(true); // Allow access to the private/protected field.
+        field.setAccessible(true);
         return (T) field.get(object);
     }
 
@@ -51,16 +51,9 @@ public class ReflectiveUtil {
      * @return An array of Fields from the class and its superclasses.
      */
     private Field[] getInheritedDeclaredFields(final Class<?> klass) {
-        // Base case: if we've reached the Object class, return an empty array.
         if (klass.equals(Object.class)) return new Field[0];
-
-        // Recursively collect fields from the superclass.
         final Field[] inheritedFields = getInheritedDeclaredFields(klass.getSuperclass());
-
-        // Collect the fields declared directly by this class.
         final Field[] ownFields = klass.getDeclaredFields();
-
-        // Combine the two arrays of fields.
         final Field[] allFields = Arrays.copyOf(ownFields, ownFields.length + inheritedFields.length);
         System.arraycopy(inheritedFields, 0, allFields, ownFields.length, inheritedFields.length);
 

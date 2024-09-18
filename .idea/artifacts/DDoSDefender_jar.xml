@@ -38,6 +38,7 @@
       <element id="extracted-dir" path="$MAVEN_REPOSITORY$/io/netty/netty-transport-classes-epoll/4.1.109.Final/netty-transport-classes-epoll-4.1.109.Final.jar" path-in-jar="/" />
       <element id="extracted-dir" path="$MAVEN_REPOSITORY$/io/netty/netty-transport-sctp/4.1.109.Final/netty-transport-sctp-4.1.109.Final.jar" path-in-jar="/" />
       <element id="extracted-dir" path="$MAVEN_REPOSITORY$/io/netty/netty-transport-udt/4.1.109.Final/netty-transport-udt-4.1.109.Final.jar" path-in-jar="/" />
+      <element id="library" level="project" name="ProtocolLib (1)" />
     </root>
   </artifact>
 </component>

@@ -5,28 +5,26 @@ import ac.kosko.dDoSDefender.NetworkUtils.ConnectionPipelineInjector;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
-/**
- * The main class for the DDoSDefender plugin.
- * Responsible for enabling and disabling the plugin,
- * and initializing network defense mechanisms.
- */
 public final class DDoSDefender extends JavaPlugin {
 
     @Override
     public void onEnable() {
-        // Register the custom network handler for rejecting connections
         ConnectionPipelineInjector.registerChannelInitializer("ConnectionRejector", new ConnectionRejectorInitializer(this));
-
-        // Inject the custom handlers into the server's network pipeline.
         ConnectionPipelineInjector.inject();
-
-        // Log a message indicating that the plugin is now active.
-        Bukkit.getLogger().info("DDoSDefender has been Enabled.");
+        Bukkit.getLogger().info("=====================================");
+        Bukkit.getLogger().info("   Thank you for using DDoSDefender!  ");
+        Bukkit.getLogger().info("   Your server's Network is now       ");
+        Bukkit.getLogger().info("   under enhanced protection.         ");
+        Bukkit.getLogger().info("=====================================");
     }
 
     @Override
     public void onDisable() {
-        // Log a message indicating that the plugin is being shut down.
-        Bukkit.getLogger().info("DDoSDefender has been disabled.");
+        Bukkit.getLogger().info("=====================================");
+        Bukkit.getLogger().info("   DDoSDefender Plugin is shutting     ");
+        Bukkit.getLogger().info("   down. Your server's protection      ");
+        Bukkit.getLogger().info("   will be temporarily paused.         ");
+        Bukkit.getLogger().info("   Thank you for using DDoSDefender!   ");
+        Bukkit.getLogger().info("=====================================");
     }
 }

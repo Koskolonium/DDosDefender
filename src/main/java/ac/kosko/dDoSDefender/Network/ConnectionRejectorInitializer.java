@@ -6,8 +6,10 @@ import com.comphenix.protocol.events.ListenerPriority;
 import com.comphenix.protocol.events.PacketAdapter;
 import com.comphenix.protocol.events.PacketEvent;
 import com.comphenix.protocol.events.PacketContainer;
+import com.comphenix.protocol.wrappers.WrappedChatComponent;
 import io.netty.channel.*;
 import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -49,15 +51,15 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
  */
 class ConnectionRejector extends ChannelInboundHandlerAdapter {
 
-    private static final int MAX_QUEUE_SIZE = 9; // Maximum number of player connections allowed in the queue.
-    private static final int PROCESS_LIMIT = 3; // Limit of how many player connections are processed per second.
+    private static final int MAX_QUEUE_SIZE = 25;
+    private static final int PROCESS_LIMIT = 5;
 
-    private final JavaPlugin plugin; // Reference to the plugin instance.
-    private final Semaphore queueLock = new Semaphore(1); // Ensures thread-safe access to the playerQueue.
-    private final ConcurrentLinkedQueue<QueuedPacket> playerQueue = new ConcurrentLinkedQueue<>(); // Queue for storing player connection requests.
-    private final AtomicInteger packetCounter = new AtomicInteger(); // Tracks the number of processed packets.
-    private final ConcurrentHashMap<Integer, LoginStartData> packetData = new ConcurrentHashMap<>(); // Stores data of queued Login Start packets.
-    private final AtomicInteger packetCountInCurrentSecond = new AtomicInteger(); // Counts packets received in the current second.
+    private final JavaPlugin plugin;
+    private final Semaphore queueLock = new Semaphore(1);
+    private final ConcurrentLinkedQueue<QueuedPacket> playerQueue = new ConcurrentLinkedQueue<>();
+    private final AtomicInteger packetCounter = new AtomicInteger();
+    private final ConcurrentHashMap<Integer, LoginStartData> packetData = new ConcurrentHashMap<>();
+    private final AtomicInteger packetCountInCurrentSecond = new AtomicInteger();
 
     /**
      * Constructor that initializes the ProtocolLib packet listener and schedules tasks for the queue processing.
@@ -66,27 +68,22 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
      */
     public ConnectionRejector(JavaPlugin plugin) {
         this.plugin = plugin;
-
-        // Listener for the Login Start packet using ProtocolLib.
         ProtocolLibrary.getProtocolManager().addPacketListener(new PacketAdapter(plugin, ListenerPriority.HIGHEST, PacketType.Login.Client.START) {
             @Override
             public void onPacketReceiving(PacketEvent event) {
-                handlePlayerConnection(event); // Process incoming connection packets.
+                handlePlayerConnection(event);
             }
         });
-
-        // Schedule a task that processes queued player connections every second.
         Bukkit.getScheduler().runTaskTimer(plugin, this::processQueue, 20L, 20L);
-
-        // Schedule a task that resets the packet count every second and logs a warning if too many packets are received.
         Bukkit.getScheduler().runTaskTimer(plugin, this::resetAndWarnPacketCount, 20L, 20L);
+        Bukkit.getLogger().info("ConnectionRejector initialized.");
     }
 
     /**
      * Stores information extracted from Login Start packets.
      */
     private static class LoginStartData {
-        private final String playerName; // The player's name from the Login Start packet.
+        private final String playerName;
 
         public LoginStartData(String playerName) {
             this.playerName = playerName;
@@ -101,8 +98,8 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
      * Represents a queued connection packet along with its unique packet ID.
      */
     private static class QueuedPacket {
-        private final PacketEvent packetEvent; // The packet event representing a player's login attempt.
-        private final int packetId; // A unique ID for each packet.
+        private final PacketEvent packetEvent;
+        private final int packetId;
 
         public QueuedPacket(PacketEvent packetEvent, int packetId) {
             this.packetEvent = packetEvent;
@@ -120,31 +117,39 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
 
     /**
      * Handles player connection requests by placing them in the queue if space is available.
-     * If the queue is full, the connection is rejected.
+     * If the queue is full, the connection is rejected with a custom message.
      *
      * @param event The packet event representing the player's connection attempt.
      */
     private void handlePlayerConnection(PacketEvent event) {
-        queueLock.acquireUninterruptibly(); // Ensure exclusive access to the queue.
+        queueLock.acquireUninterruptibly();
         try {
-            if (playerQueue.size() < MAX_QUEUE_SIZE) { // Check if there's space in the queue.
-                int packetId = packetCounter.incrementAndGet(); // Generate a unique packet ID.
-                LoginStartData data = extractLoginStartData(event.getPacket()); // Extract the player's data from the packet.
+            if (playerQueue.size() < MAX_QUEUE_SIZE) {
+                int packetId = packetCounter.incrementAndGet();
+                LoginStartData data = extractLoginStartData(event.getPacket());
                 if (data != null) {
-                    packetData.put(packetId, data); // Store the extracted data in the map.
-                    playerQueue.add(new QueuedPacket(event, packetId)); // Add the packet to the queue.
-                    event.setCancelled(true); // Cancel the packet to hold the connection until processed.
+                    packetData.put(packetId, data);
+                    playerQueue.add(new QueuedPacket(event, packetId));
+                    event.setCancelled(true);
 
-                    // Increment the packet count for the current second.
                     packetCountInCurrentSecond.incrementAndGet();
+                    Bukkit.getLogger().info("Player " + data.getPlayerName() + " added to the queue. Packet ID: " + packetId);
+
+                    // Send a custom message telling the player they are in the queue
+                    sendQueueMessage(event.getPlayer(), "You are in the queue. Please be patient.");
                 } else {
-                    event.setCancelled(true); // Cancel the packet if data extraction fails.
+                    event.setCancelled(true);
+                    Bukkit.getLogger().warning("Failed to extract player data from the Login Start packet.");
                 }
             } else {
-                event.setCancelled(true); // Cancel the packet if the queue is full.
+                event.setCancelled(true);
+
+                // Send custom message when the queue is full
+                sendQueueMessage(event.getPlayer(), "Queue is full. Please try again later.");
+                Bukkit.getLogger().warning("Player connection rejected: queue is full.");
             }
         } finally {
-            queueLock.release(); // Release the lock to allow other threads to access the queue.
+            queueLock.release();
         }
     }
 
@@ -156,57 +161,72 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
      */
     private LoginStartData extractLoginStartData(PacketContainer packet) {
         try {
-            // Extract the player's name from the Login Start packet.
             if (packet.getStrings().size() > 0) {
                 String playerName = packet.getStrings().read(0);
                 return new LoginStartData(playerName);
             }
             return null;
         } catch (Exception e) {
-            return null; // Return null if extraction fails.
+            Bukkit.getLogger().severe("Error extracting player name from packet: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Sends a disconnect message to the player during the login process.
+     *
+     * @param player The player to send the message to.
+     * @param message The message to display when the player is disconnected.
+     */
+    private void sendQueueMessage(Player player, String message) {
+        try {
+            PacketContainer disconnectPacket = ProtocolLibrary.getProtocolManager().createPacket(PacketType.Login.Server.DISCONNECT);
+            disconnectPacket.getChatComponents().write(0, WrappedChatComponent.fromText(message));
+            ProtocolLibrary.getProtocolManager().sendServerPacket(player, disconnectPacket);
+        } catch (Exception e) {
+            Bukkit.getLogger().severe("Error sending queue message: " + e.getMessage());
         }
     }
 
     /**
      * Processes the player connection queue and sends packets for further processing.
-     * Processes a maximum of 3 player connections per second.
+     * Processes a maximum of 5 player connections per second.
      */
     private void processQueue() {
-        queueLock.acquireUninterruptibly(); // Ensure exclusive access to the queue.
+        queueLock.acquireUninterruptibly();
         try {
-            int processedCount = 0; // Tracks the number of processed packets.
-            while (processedCount < PROCESS_LIMIT && !playerQueue.isEmpty()) { // Process up to PROCESS_LIMIT packets.
-                QueuedPacket queuedPacket = playerQueue.poll(); // Retrieve the next packet from the queue.
+            int processedCount = 0;
+            while (processedCount < PROCESS_LIMIT && !playerQueue.isEmpty()) {
+                QueuedPacket queuedPacket = playerQueue.poll();
                 if (queuedPacket != null) {
                     int packetId = queuedPacket.getPacketId();
-                    LoginStartData data = packetData.remove(packetId); // Remove the corresponding data from the map.
+                    LoginStartData data = packetData.remove(packetId);
                     if (data != null) {
                         PacketEvent packetEvent = queuedPacket.getPacketEvent();
                         PacketContainer packet = packetEvent.getPacket();
-                        packet.getStrings().write(0, data.getPlayerName()); // Re-insert the player name into the packet.
-
-                        // Process the packet using ProtocolLib to allow the player to join the server.
+                        packet.getStrings().write(0, data.getPlayerName());
                         try {
                             ProtocolLibrary.getProtocolManager().receiveClientPacket(packetEvent.getPlayer(), packet, false);
                             processedCount++;
+                            Bukkit.getLogger().info("Processed player " + data.getPlayerName() + " with Packet ID: " + packetId);
                         } catch (Exception e) {
-                            Bukkit.getLogger().warning("Failed to process packet: " + e.getMessage()); // Log a warning if packet processing fails.
+                            Bukkit.getLogger().warning("Failed to process packet for player " + data.getPlayerName() + ": " + e.getMessage());
                         }
                     }
                 }
             }
         } finally {
-            queueLock.release(); // Release the lock to allow other threads to access the queue.
+            queueLock.release();
         }
     }
 
     /**
-     * Resets the packet count every second and logs a warning if more than 50 packets were received.
+     * Resets the packet count every second and logs a warning if more than 150 packets were received.
      */
     private void resetAndWarnPacketCount() {
-        int count = packetCountInCurrentSecond.getAndSet(0); // Get and reset the packet count.
-        if (count > 50) {
-            Bukkit.getLogger().warning("Possible DDoS Attack In Progress Beware!!.");
+        int count = packetCountInCurrentSecond.getAndSet(0);
+        if (count > 150) {
+            Bukkit.getLogger().warning("Possible DDoS Attack In Progress: more than 150 packets received in one second.");
         }
     }
 }

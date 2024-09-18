@@ -16,8 +16,6 @@ import java.util.Map;
  */
 @Data
 public class ConnectionPipelineInjector {
-
-    // A thread-safe map to store the different network handlers (ChannelInitializers) to be injected.
     private static final Map<String, ChannelInitializer<Channel>> CHANNEL_INITIALIZER_MAP = new ConcurrentHashMap<>();
     private static boolean injected;
 
@@ -39,7 +37,7 @@ public class ConnectionPipelineInjector {
      */
     public static void inject() {
         Bukkit.getLogger().info("Injecting custom network handlers into the server's pipeline...");
-        injectAcceptors(); // Injects the custom handlers into the network pipeline.
+        injectAcceptors();
     }
 
     /**
@@ -49,15 +47,10 @@ public class ConnectionPipelineInjector {
     public static void injectAcceptors() {
         if (!injected) {
             try {
-                // Get the internal Minecraft server instance.
                 final Object nmsServer = NMSUtil.getServerInstance();
                 Bukkit.getLogger().info("Retrieved internal Minecraft server instance.");
-
-                // Retrieve the list of active connection channels (ChannelFutures).
                 final List<ChannelFuture> channelFutures = NMSUtil.getServerChannelFutures(nmsServer);
                 Bukkit.getLogger().info("Retrieved list of active connection channels.");
-
-                // Inject the custom handlers into the pipeline of each channel.
                 for (final ChannelFuture channelFuture : channelFutures) {
                     final ChannelPipeline pipeline = channelFuture.channel().pipeline();
                     CHANNEL_INITIALIZER_MAP.forEach((name, initializer) -> {
@@ -65,8 +58,7 @@ public class ConnectionPipelineInjector {
                         Bukkit.getLogger().info("Added custom handler '" + name + "' to connection pipeline.");
                     });
                 }
-
-                injected = true; // Mark the injection as completed.
+                injected = true;
                 Bukkit.getLogger().info("Custom network handlers injected successfully.");
             } catch (ClassNotFoundException | NoSuchFieldException | IllegalAccessException e) {
                 Bukkit.getLogger().severe("Failed to inject Netty handler: " + e.getClass().getSimpleName());
