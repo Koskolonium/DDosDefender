@@ -17,38 +17,18 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Initializes the custom connection handler (ConnectionRejector)
- * and adds it to the Netty channel pipeline for intercepting player connections.
- */
 public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
 
     private final JavaPlugin plugin;
-
-    /**
-     * Constructor that accepts the plugin instance to initialize the connection rejector.
-     *
-     * @param plugin The plugin instance.
-     */
     public ConnectionRejectorInitializer(JavaPlugin plugin) {
         this.plugin = plugin;
     }
-
-    /**
-     * Adds the ConnectionRejector to the Netty channel pipeline to intercept connections.
-     *
-     * @param ch The Netty channel where the handler is added.
-     */
     @Override
     protected void initChannel(Channel ch) throws Exception {
         ChannelPipeline pipeline = ch.pipeline();
-        pipeline.addFirst("connectionRejector", new ConnectionRejector(plugin)); // Adds custom handler
+        pipeline.addFirst("connectionRejector", new ConnectionRejector(plugin));
     }
 }
-
-/**
- * Handles connection attempts, queues player connections, and limits how many players can join per second.
- */
 class ConnectionRejector extends ChannelInboundHandlerAdapter {
 
     private static final int MAX_QUEUE_SIZE = 25;
@@ -60,12 +40,6 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
     private final AtomicInteger packetCounter = new AtomicInteger();
     private final ConcurrentHashMap<Integer, LoginStartData> packetData = new ConcurrentHashMap<>();
     private final AtomicInteger packetCountInCurrentSecond = new AtomicInteger();
-
-    /**
-     * Constructor that initializes the ProtocolLib packet listener and schedules tasks for the queue processing.
-     *
-     * @param plugin The plugin instance.
-     */
     public ConnectionRejector(JavaPlugin plugin) {
         this.plugin = plugin;
         ProtocolLibrary.getProtocolManager().addPacketListener(new PacketAdapter(plugin, ListenerPriority.HIGHEST, PacketType.Login.Client.START) {
@@ -78,10 +52,6 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
         Bukkit.getScheduler().runTaskTimer(plugin, this::resetAndWarnPacketCount, 20L, 20L);
         Bukkit.getLogger().info("ConnectionRejector initialized.");
     }
-
-    /**
-     * Stores information extracted from Login Start packets.
-     */
     private static class LoginStartData {
         private final String playerName;
 
@@ -93,10 +63,6 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
             return playerName;
         }
     }
-
-    /**
-     * Represents a queued connection packet along with its unique packet ID.
-     */
     private static class QueuedPacket {
         private final PacketEvent packetEvent;
         private final int packetId;
@@ -114,13 +80,6 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
             return packetId;
         }
     }
-
-    /**
-     * Handles player connection requests by placing them in the queue if space is available.
-     * If the queue is full, the connection is rejected with a custom message.
-     *
-     * @param event The packet event representing the player's connection attempt.
-     */
     private void handlePlayerConnection(PacketEvent event) {
         queueLock.acquireUninterruptibly();
         try {
@@ -131,11 +90,8 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
                     packetData.put(packetId, data);
                     playerQueue.add(new QueuedPacket(event, packetId));
                     event.setCancelled(true);
-
                     packetCountInCurrentSecond.incrementAndGet();
                     Bukkit.getLogger().info("Player " + data.getPlayerName() + " added to the queue. Packet ID: " + packetId);
-
-                    // Send a custom message telling the player they are in the queue
                     sendQueueMessage(event.getPlayer(), "You are in the queue. Please be patient.");
                 } else {
                     event.setCancelled(true);
@@ -143,8 +99,6 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
                 }
             } else {
                 event.setCancelled(true);
-
-                // Send custom message when the queue is full
                 sendQueueMessage(event.getPlayer(), "Queue is full. Please try again later.");
                 Bukkit.getLogger().warning("Player connection rejected: queue is full.");
             }
@@ -152,13 +106,6 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
             queueLock.release();
         }
     }
-
-    /**
-     * Extracts the player's name from the Login Start packet.
-     *
-     * @param packet The Login Start packet.
-     * @return A LoginStartData object containing the player's name, or null if extraction fails.
-     */
     private LoginStartData extractLoginStartData(PacketContainer packet) {
         try {
             if (packet.getStrings().size() > 0) {
@@ -171,13 +118,6 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
             return null;
         }
     }
-
-    /**
-     * Sends a disconnect message to the player during the login process.
-     *
-     * @param player The player to send the message to.
-     * @param message The message to display when the player is disconnected.
-     */
     private void sendQueueMessage(Player player, String message) {
         try {
             PacketContainer disconnectPacket = ProtocolLibrary.getProtocolManager().createPacket(PacketType.Login.Server.DISCONNECT);
@@ -187,11 +127,6 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
             Bukkit.getLogger().severe("Error sending queue message: " + e.getMessage());
         }
     }
-
-    /**
-     * Processes the player connection queue and sends packets for further processing.
-     * Processes a maximum of 5 player connections per second.
-     */
     private void processQueue() {
         queueLock.acquireUninterruptibly();
         try {
@@ -219,10 +154,6 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
             queueLock.release();
         }
     }
-
-    /**
-     * Resets the packet count every second and logs a warning if more than 150 packets were received.
-     */
     private void resetAndWarnPacketCount() {
         int count = packetCountInCurrentSecond.getAndSet(0);
         if (count > 150) {
