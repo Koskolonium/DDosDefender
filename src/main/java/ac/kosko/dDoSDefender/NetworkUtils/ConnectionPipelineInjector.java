@@ -9,41 +9,21 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * This class is responsible for managing and injecting custom network handlers
- * into the server's connection pipeline. It allows the plugin to intercept
- * new player connections and apply custom logic before they reach the server.
- */
 @Data
 public class ConnectionPipelineInjector {
     private static final Map<String, ChannelInitializer<Channel>> CHANNEL_INITIALIZER_MAP = new ConcurrentHashMap<>();
     private static boolean injected;
-
-    /**
-     * Registers a new custom network handler (ChannelInitializer) to be added
-     * to the server's connection pipeline.
-     *
-     * @param name A unique identifier for this handler.
-     * @param initializer The custom network handler (ChannelInitializer).
-     */
+    
     public static void registerChannelInitializer(@NonNull final String name, @NonNull final ChannelInitializer<Channel> initializer) {
         CHANNEL_INITIALIZER_MAP.put(name, initializer);
         Bukkit.getLogger().info("Registered custom network handler: " + name);
     }
 
-    /**
-     * Injects all registered custom network handlers into the server's pipeline.
-     * This process will allow the plugin to apply custom logic during player connection.
-     */
     public static void inject() {
         Bukkit.getLogger().info("Injecting custom network handlers into the server's pipeline...");
         injectAcceptors();
     }
 
-    /**
-     * Finds the connection entry points in the server and injects the custom handlers there.
-     * This ensures the plugin can intercept connections at the earliest stage.
-     */
     public static void injectAcceptors() {
         if (!injected) {
             try {
