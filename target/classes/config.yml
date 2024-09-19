@@ -1,0 +1,14 @@
+# Default settings are suitable for most small to medium SMPs or servers with fewer than 300 active players.
+#
+# For servers with 300+ active players:
+# Recommended queue size: 50
+# Recommended processing limit: 10
+#
+# For servers with 600+ active players:
+# Recommended queue size: 75
+# Recommended processing limit: 15
+
+queue:
+  size: 25  # Maximum size of the player connection queue
+process:
+  limit: 5  # Number of player connections to process per second
