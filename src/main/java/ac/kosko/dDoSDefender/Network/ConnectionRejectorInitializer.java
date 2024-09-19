@@ -157,7 +157,6 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
                         try {
                             ProtocolLibrary.getProtocolManager().receiveClientPacket(packetEvent.getPlayer(), packet, false);
                             processedCount++;
-                            Bukkit.getLogger().info("Processed player " + data.getPlayerName() + " with Packet ID: " + packetId);
                         } catch (Exception e) {
                             Bukkit.getLogger().warning("Failed to process packet for player " + data.getPlayerName() + ": " + e.getMessage());
                         }
