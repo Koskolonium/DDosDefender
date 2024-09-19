@@ -4,3 +4,4 @@ main: ac.kosko.dDoSDefender.DDoSDefender
 api-version: '1.20'
 authors: [ Koskolonium ]
 description: This plugin limits the rate of incoming connections to a Minecraft server to prevent potential DDoS attacks.
+depend: [ ProtocolLib ]

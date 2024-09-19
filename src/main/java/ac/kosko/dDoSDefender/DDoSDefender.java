@@ -9,6 +9,7 @@ public final class DDoSDefender extends JavaPlugin {
 
     @Override
     public void onEnable() {
+        saveDefaultConfig();
         ConnectionPipelineInjector.registerChannelInitializer("ConnectionRejector", new ConnectionRejectorInitializer(this));
         ConnectionPipelineInjector.inject();
         Bukkit.getLogger().info("=====================================");
