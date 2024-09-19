@@ -28,7 +28,7 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
     @Override
     protected void initChannel(Channel ch) throws Exception {
         ChannelPipeline pipeline = ch.pipeline();
-        pipeline.addFirst("connectionRejector", new ConnectionRejector(plugin)); // Adds custom handler
+        pipeline.addFirst("connectionRejector", new ConnectionRejector(plugin));
     }
 }
 
@@ -59,7 +59,6 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
 
         Bukkit.getScheduler().runTaskTimer(plugin, this::processQueue, 20L, 20L);
         Bukkit.getScheduler().runTaskTimer(plugin, this::resetAndWarnPacketCount, 20L, 20L);
-        Bukkit.getLogger().info("ConnectionRejector initialized.");
     }
 
     private static class LoginStartData {
