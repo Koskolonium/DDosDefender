@@ -110,7 +110,6 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
                 if (sendQueueMessage) {
                     sendQueueMessage(event.getPlayer(), "Queue is full. Please try again later.");
                 }
-                Bukkit.getLogger().warning("Player connection rejected: queue is full.");
             }
         } finally {
             queueLock.release();
