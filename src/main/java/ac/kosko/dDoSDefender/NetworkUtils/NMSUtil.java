@@ -11,7 +11,7 @@ import lombok.experimental.UtilityClass;
 public class NMSUtil {
     private static final String OBC_PACKAGE = Bukkit.getServer().getClass().getPackage().getName();
     private static final String OBC_VERSION_STRING = OBC_PACKAGE.split("\\.").length > 3 ? OBC_PACKAGE.split("\\.")[3] : "";
-    private static final boolean USE_MODERN_NMS_NAMES = OBC_VERSION_STRING.isEmpty() || parseVersion(OBC_VERSION_STRING) >= 18; // 1.18+
+    private static final boolean USE_MODERN_NMS_NAMES = OBC_VERSION_STRING.isEmpty() || parseVersion() >= 18; // 1.18+
     private static final String NMS_PACKAGE = USE_MODERN_NMS_NAMES ? "net.minecraft.server" : "net.minecraft.server." + OBC_VERSION_STRING;
 
     public Class<?> getNMSClass(final String legacyName, final String modernName) throws ClassNotFoundException {
@@ -33,9 +33,9 @@ public class NMSUtil {
         return ReflectiveUtil.getFieldValue(serverConnection, channelFuturesField);
     }
     
-    private int parseVersion(String versionString) {
+    private int parseVersion() {
         try {
-            String[] parts = versionString.split("_");
+            String[] parts = NMSUtil.OBC_VERSION_STRING.split("_");
             return parts.length > 1 ? Integer.parseInt(parts[1]) : -1;
         } catch (NumberFormatException e) {
             return -1;

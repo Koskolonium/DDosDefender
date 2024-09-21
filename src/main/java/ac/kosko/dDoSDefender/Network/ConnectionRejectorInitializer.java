@@ -8,6 +8,7 @@ import com.comphenix.protocol.events.PacketEvent;
 import com.comphenix.protocol.events.PacketContainer;
 import com.comphenix.protocol.wrappers.WrappedChatComponent;
 import io.netty.channel.*;
+import lombok.Getter;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -34,7 +35,6 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
 
 class ConnectionRejector extends ChannelInboundHandlerAdapter {
 
-    private final JavaPlugin plugin;
     private final Semaphore queueLock = new Semaphore(1);
     private final ConcurrentLinkedQueue<QueuedPacket> playerQueue = new ConcurrentLinkedQueue<>();
     private final AtomicInteger packetCounter = new AtomicInteger();
@@ -46,7 +46,6 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
     private final int processLimit;
 
     public ConnectionRejector(JavaPlugin plugin) {
-        this.plugin = plugin;
         this.maxQueueSize = plugin.getConfig().getInt("queue.size", 25);
         this.processLimit = plugin.getConfig().getInt("process.limit", 5);
 
@@ -61,6 +60,7 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
         Bukkit.getScheduler().runTaskTimer(plugin, this::resetAndWarnPacketCount, 20L, 20L);
     }
 
+    @Getter
     private static class LoginStartData {
         private final String playerName;
 
@@ -68,11 +68,9 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
             this.playerName = playerName;
         }
 
-        public String getPlayerName() {
-            return playerName;
-        }
     }
 
+    @Getter
     private static class QueuedPacket {
         private final PacketEvent packetEvent;
         private final int packetId;
@@ -82,13 +80,6 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
             this.packetId = packetId;
         }
 
-        public PacketEvent getPacketEvent() {
-            return packetEvent;
-        }
-
-        public int getPacketId() {
-            return packetId;
-        }
     }
 
     private void handlePlayerConnection(PacketEvent event) {
@@ -108,7 +99,7 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
                 event.setCancelled(true);
 
                 if (sendQueueMessage) {
-                    sendQueueMessage(event.getPlayer(), "Queue is full. Please try again later.");
+                    sendQueueMessage(event.getPlayer());
                 }
             }
         } finally {
@@ -129,10 +120,10 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
         }
     }
 
-    private void sendQueueMessage(Player player, String message) {
+    private void sendQueueMessage(Player player) {
         try {
             PacketContainer disconnectPacket = ProtocolLibrary.getProtocolManager().createPacket(PacketType.Login.Server.DISCONNECT);
-            disconnectPacket.getChatComponents().write(0, WrappedChatComponent.fromText(message));
+            disconnectPacket.getChatComponents().write(0, WrappedChatComponent.fromText("Queue is full. Please try again later."));
             ProtocolLibrary.getProtocolManager().sendServerPacket(player, disconnectPacket);
         } catch (Exception e) {
             Bukkit.getLogger().severe("Error sending queue message: " + e.getMessage());
