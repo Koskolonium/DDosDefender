@@ -32,10 +32,10 @@ public class NMSUtil {
         final Field channelFuturesField = ReflectiveUtil.getFieldByType(serverConnection.getClass(), List.class);
         return ReflectiveUtil.getFieldValue(serverConnection, channelFuturesField);
     }
-    
+
     private int parseVersion() {
         try {
-            String[] parts = NMSUtil.OBC_VERSION_STRING.split("_");
+            String[] parts = OBC_VERSION_STRING.split("_");
             return parts.length > 1 ? Integer.parseInt(parts[1]) : -1;
         } catch (NumberFormatException e) {
             return -1;

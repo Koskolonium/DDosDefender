@@ -7,6 +7,7 @@ import java.util.Arrays;
 
 @UtilityClass
 public class ReflectiveUtil {
+
     public Field getFieldByType(final Class<?> klass, final Class<?> type) throws NoSuchFieldException {
         for (final Field field : getInheritedDeclaredFields(klass)) {
             if (type.isAssignableFrom(field.getType())) {
@@ -17,10 +18,12 @@ public class ReflectiveUtil {
 
         throw new NoSuchFieldException("Type: " + type.getName());
     }
+
     public <T> T getFieldValue(final Object object, final Field field) throws IllegalAccessException {
         field.setAccessible(true);
         return (T) field.get(object);
     }
+
     private Field[] getInheritedDeclaredFields(final Class<?> klass) {
         if (klass.equals(Object.class)) return new Field[0];
         final Field[] inheritedFields = getInheritedDeclaredFields(klass.getSuperclass());

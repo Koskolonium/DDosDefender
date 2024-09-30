@@ -11,11 +11,15 @@ import java.util.Map;
 
 @Data
 public class ConnectionPipelineInjector {
-    private static final Map<String, ChannelInitializer<Channel>> CHANNEL_INITIALIZER_MAP = new ConcurrentHashMap<>();
+    private static final Map<String, ChannelInitializer<Channel>> CUSTOM_HANDLER_MAP = new ConcurrentHashMap<>();
     private static boolean injected;
-    
+
     public static void registerChannelInitializer(@NonNull final String name, @NonNull final ChannelInitializer<Channel> initializer) {
-        CHANNEL_INITIALIZER_MAP.put(name, initializer);
+        if (CUSTOM_HANDLER_MAP.containsKey(name)) {
+            Bukkit.getLogger().warning("Custom handler '" + name + "' is already registered.");
+            return;
+        }
+        CUSTOM_HANDLER_MAP.put(name, initializer);
         Bukkit.getLogger().info("Registered custom network handler: " + name);
     }
 
@@ -25,27 +29,25 @@ public class ConnectionPipelineInjector {
     }
 
     public static void injectAcceptors() {
-        if (!injected) {
-            try {
-                final Object nmsServer = NMSUtil.getServerInstance();
-                Bukkit.getLogger().info("Retrieved internal Minecraft server instance.");
-                final List<ChannelFuture> channelFutures = NMSUtil.getServerChannelFutures(nmsServer);
-                Bukkit.getLogger().info("Retrieved list of active connection channels.");
-                for (final ChannelFuture channelFuture : channelFutures) {
-                    final ChannelPipeline pipeline = channelFuture.channel().pipeline();
-                    CHANNEL_INITIALIZER_MAP.forEach((name, initializer) -> {
-                        pipeline.addLast(name, initializer);
-                        Bukkit.getLogger().info("Added custom handler '" + name + "' to connection pipeline.");
-                    });
-                }
-                injected = true;
-                Bukkit.getLogger().info("Custom network handlers injected successfully.");
-            } catch (ClassNotFoundException | NoSuchFieldException | IllegalAccessException e) {
-                Bukkit.getLogger().severe("Failed to inject Netty handler: " + e.getClass().getSimpleName());
-                e.printStackTrace();
-            }
-        } else {
+        if (injected) {
             Bukkit.getLogger().info("Custom network handlers already injected.");
+            return;
+        }
+        try {
+            final Object nmsServer = NMSUtil.getServerInstance();
+            Bukkit.getLogger().info("Retrieved internal Minecraft server instance.");
+            final List<ChannelFuture> channelFutures = NMSUtil.getServerChannelFutures(nmsServer);
+            Bukkit.getLogger().info("Retrieved list of active connection channels.");
+            for (final ChannelFuture channelFuture : channelFutures) {
+                final ChannelPipeline pipeline = channelFuture.channel().pipeline();
+                CUSTOM_HANDLER_MAP.forEach((name, initializer) -> pipeline.addLast(name, initializer));
+                Bukkit.getLogger().info("Added custom handlers to connection pipeline.");
+            }
+            injected = true;
+            Bukkit.getLogger().info("Custom network handlers injected successfully.");
+        } catch (ClassNotFoundException | NoSuchFieldException | IllegalAccessException e) {
+            Bukkit.getLogger().severe("Failed to inject Netty handler: " + e.getClass().getSimpleName());
+            e.printStackTrace();
         }
     }
 }

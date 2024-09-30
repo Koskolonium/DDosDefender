@@ -56,8 +56,8 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
             }
         });
 
-        Bukkit.getScheduler().runTaskTimer(plugin, this::processQueue, 20L, 20L);
-        Bukkit.getScheduler().runTaskTimer(plugin, this::resetAndWarnPacketCount, 20L, 20L);
+        Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, this::processQueue, 20L, 20L);
+        Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, this::resetAndWarnPacketCount, 20L, 20L);
     }
 
     @Getter
@@ -133,7 +133,7 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
     private void processQueue() {
         queueLock.acquireUninterruptibly();
         try {
-            int processedCount = 0;
+            int processedCount = 0 ;
             while (processedCount < processLimit && !playerQueue.isEmpty()) {
                 QueuedPacket queuedPacket = playerQueue.poll();
                 if (queuedPacket != null) {
