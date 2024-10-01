@@ -160,7 +160,7 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
     private void resetAndWarnPacketCount() {
         int count = packetCountInCurrentSecond.getAndSet(0);
         if (count > 150) {
-            Bukkit.getLogger().warning("Possible DDoS Attack In Progress: more than 150 packets received in one second.");
+            Bukkit.getLogger().warning("High Traffic Detected: more then 150 connection requests recieved in 1 Second.");
             sendQueueMessage = false;
         } else {
             sendQueueMessage = true;
