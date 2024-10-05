@@ -15,8 +15,7 @@ public class ReflectiveUtil {
                 return field;
             }
         }
-
-        throw new NoSuchFieldException("Type: " + type.getName());
+        throw new NoSuchFieldException("Type: " + type.getName() + " not found in class: " + klass.getName());
     }
 
     public <T> T getFieldValue(final Object object, final Field field) throws IllegalAccessException {

@@ -1,6 +1,7 @@
 package ac.kosko.dDoSDefender.NetworkUtils;
 
 import org.bukkit.Bukkit;
+import org.bukkit.Server;
 
 import java.lang.reflect.Field;
 import java.util.List;
@@ -19,16 +20,17 @@ public class NMSUtil {
     }
 
     public Object getServerInstance() throws ClassNotFoundException, NoSuchFieldException, IllegalAccessException {
-        final Class<?> minecraftServerClass = getNMSClass("MinecraftServer", "MinecraftServer");
-        final Field serverField = ReflectiveUtil.getFieldByType(minecraftServerClass, minecraftServerClass);
-        return ReflectiveUtil.getFieldValue(null, serverField);
+        String craftServerClassName = OBC_PACKAGE + ".CraftServer";
+        Class<?> craftServerClass = Class.forName(craftServerClassName);
+        Field serverField = ReflectiveUtil.getFieldByType(craftServerClass, getNMSClass("MinecraftServer", "MinecraftServer"));
+        Server bukkitServer = Bukkit.getServer();
+        return ReflectiveUtil.getFieldValue(bukkitServer, serverField);
     }
 
     public List<ChannelFuture> getServerChannelFutures(final Object server) throws NoSuchFieldException, IllegalAccessException, ClassNotFoundException {
         final Class<?> serverConnectionClass = getNMSClass("ServerConnection", "network.ServerConnection");
         final Field serverConnectionField = ReflectiveUtil.getFieldByType(server.getClass(), serverConnectionClass);
         final Object serverConnection = ReflectiveUtil.getFieldValue(server, serverConnectionField);
-
         final Field channelFuturesField = ReflectiveUtil.getFieldByType(serverConnection.getClass(), List.class);
         return ReflectiveUtil.getFieldValue(serverConnection, channelFuturesField);
     }
