@@ -1,4 +1,4 @@
-# Default settings are suitable for most small to medium SMPs or servers with fewer than 300 active players.
+# Default settings are suitable for most servers with fewer than 300 active players.
 #
 # For servers with 300+ active players:
 # Recommended queue size: 50
@@ -8,9 +8,9 @@
 # Recommended queue size: 15
 # Recommended processing limit: 3
 #
-# If you are using Pro+ TCPShield or similar external DDoS protection:
-# It is recommended to set your "Connections per second" in your control panel
-# to be +50%-150% higher than the limit set in this config.
+# If you are using Premium+ TCPShield or similar external DDoS protection:
+# It is recommended to use the recommended settings for 300+ active players above,
+# Then set your "Connections per second" in your control panel to be between 11-15.
 #
 # Note: Increasing the queue size without appropriately adjusting the processing limit
 # can cause players to experience longer connection times.

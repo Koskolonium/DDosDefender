@@ -8,6 +8,7 @@ import com.comphenix.protocol.events.PacketEvent;
 import com.comphenix.protocol.events.PacketContainer;
 import com.comphenix.protocol.wrappers.WrappedChatComponent;
 import com.google.gson.Gson;
+import lombok.Setter;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -41,7 +42,7 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
     }
 
     @Override
-    protected void initChannel(Channel ch) throws Exception {
+    protected void initChannel(Channel ch) {
         ChannelPipeline pipeline = ch.pipeline();
         pipeline.addFirst("connectionRejector", new ConnectionRejector(plugin));
     }
@@ -53,6 +54,8 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
     private final AtomicInteger packetCounter = new AtomicInteger();
     private final ConcurrentHashMap<Integer, LoginStartData> packetData = new ConcurrentHashMap<>();
     private final AtomicInteger packetCountInCurrentSecond = new AtomicInteger();
+    @Setter
+    @Getter
     private boolean sendQueueMessage = true;
     private final int maxQueueSize;
     private final int processLimit;
@@ -60,16 +63,14 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
     private final long RATE_LIMIT_INTERVAL_MS;
     private final OkHttpClient httpClient;
     private final Gson gson;
-    private final JavaPlugin plugin;
     private final ConcurrentHashMap<String, Boolean> verifiedPlayerNames = new ConcurrentHashMap<>();
     private final File verifiedNamesFile;
     private final ConcurrentHashMap<String, Boolean> invalidatedPlayerNames = new ConcurrentHashMap<>();
     private final File invalidatedNamesFile;
-    private final AtomicInteger verificationCounter = new AtomicInteger(0);
-    private final int VERIFICATION_LIMIT_PER_MINUTE = 200;
+    private final AtomicInteger verificationCounter = new AtomicInteger();
+    private final AtomicInteger invalidationCounter = new AtomicInteger();
 
     public ConnectionRejector(JavaPlugin plugin) {
-        this.plugin = plugin;
         this.maxQueueSize = plugin.getConfig().getInt("queue.size", 40);
         this.processLimit = plugin.getConfig().getInt("process.limit", 8);
         this.RATE_LIMIT_INTERVAL_MS = 5000;
@@ -79,10 +80,8 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
         if (!verifiedNamesFile.exists()) {
             try {
                 if (verifiedNamesFile.createNewFile()) {
-                    Bukkit.getLogger().info("Created verified_players.txt");
                 }
             } catch (IOException e) {
-                Bukkit.getLogger().severe("Failed to create verified_players.txt: " + e.getMessage());
             }
         }
 
@@ -90,10 +89,8 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
         if (!invalidatedNamesFile.exists()) {
             try {
                 if (invalidatedNamesFile.createNewFile()) {
-                    Bukkit.getLogger().info("Created invalidated_players.txt");
                 }
             } catch (IOException e) {
-                Bukkit.getLogger().severe("Failed to create invalidated_players.txt: " + e.getMessage());
             }
         }
 
@@ -173,6 +170,7 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
             return;
         }
 
+        int VERIFICATION_LIMIT_PER_MINUTE = 200;
         if (verificationCounter.get() >= VERIFICATION_LIMIT_PER_MINUTE) {
             event.setCancelled(true);
             sendQueueMessage(event.getPlayer(), MessageType.VERIFICATION_LIMIT_REACHED);
@@ -210,7 +208,7 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
 
         try (Response response = httpClient.newCall(request).execute()) {
             if (response.isSuccessful()) {
-                String body = response.body().string();
+                String body = Objects.requireNonNull(response.body()).string();
                 if (body.isEmpty()) {
                     event.setCancelled(true);
                     sendQueueMessage(event.getPlayer(), MessageType.FAILED_VERIFICATION);
@@ -331,13 +329,12 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
 
     private void resetVerificationCounter() {
         verificationCounter.set(0);
-        Bukkit.getLogger().info("Verification counter reset.");
     }
 
     private void resetAndWarnPacketCount() {
         int count = packetCountInCurrentSecond.getAndSet(0);
         if (count > 150) {
-            Bukkit.getLogger().warning("High Traffic Detected: more than 150 connection requests received in 1 Second.");
+            Bukkit.getLogger().warning("⚠️ High Traffic Detected: more than 150 connection requests received in 1 Second. ⚠️");
             sendQueueMessage = false;
         } else {
             sendQueueMessage = true;
@@ -352,27 +349,12 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
         VERIFICATION_LIMIT_REACHED
     }
 
+    @Getter
     private static class MojangResponse {
         private String id;
         private String name;
         private Boolean legacy;
         private Boolean demo;
-
-        public String getId() {
-            return id;
-        }
-
-        public String getName() {
-            return name;
-        }
-
-        public Boolean getLegacy() {
-            return legacy;
-        }
-
-        public Boolean getDemo() {
-            return demo;
-        }
     }
 
     private void loadVerifiedPlayerNames() {
@@ -409,9 +391,7 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
             try (BufferedWriter writer = new BufferedWriter(new FileWriter(verifiedNamesFile, true))) {
                 writer.write(lowerCaseName);
                 writer.newLine();
-                Bukkit.getLogger().info("Added verified player: " + playerName);
             } catch (IOException e) {
-                Bukkit.getLogger().severe("Failed to add verified player " + playerName + ": " + e.getMessage());
             }
         }
     }
@@ -422,10 +402,13 @@ class ConnectionRejector extends ChannelInboundHandlerAdapter {
             try (BufferedWriter writer = new BufferedWriter(new FileWriter(invalidatedNamesFile, true))) {
                 writer.write(lowerCaseName);
                 writer.newLine();
-                Bukkit.getLogger().info("Added invalidated player: " + playerName);
             } catch (IOException e) {
-                Bukkit.getLogger().severe("Failed to add invalidated player " + playerName + ": " + e.getMessage());
             }
+        }
+        int currentCount = invalidationCounter.incrementAndGet();
+        if (currentCount >= 150) {
+            Bukkit.getLogger().warning("⚠️ **DDoSDefender Successfully Mitigated a Potential Bot Attack!** ⚠️");
+            invalidationCounter.set(0);
         }
     }
 }
