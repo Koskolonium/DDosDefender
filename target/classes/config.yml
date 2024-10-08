@@ -4,11 +4,18 @@
 # Recommended queue size: 50
 # Recommended processing limit: 10
 #
-# For servers with 600+ active players:
-# Recommended queue size: 75
-# Recommended processing limit: 15
+# If using Free TCPShield Plan:
+# Recommended queue size: 15
+# Recommended processing limit: 3
+#
+# If you are using Pro+ TCPShield or similar external DDoS protection:
+# It is recommended to set your "Connections per second" in your control panel
+# to be +50%-150% higher than the limit set in this config.
+#
+# Note: Increasing the queue size without appropriately adjusting the processing limit
+# can cause players to experience longer connection times.
 
 queue:
-  size: 25  # Maximum size of the player connection queue
+  size: 25  # Maximum number of players that can wait in the connection queue
 process:
-  limit: 5  # Number of player connections to process per second
+  limit: 5  # Number of player connections processed per second

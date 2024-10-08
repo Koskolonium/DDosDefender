@@ -40,7 +40,7 @@ public class ConnectionPipelineInjector {
             Bukkit.getLogger().info("Retrieved list of active connection channels.");
             for (final ChannelFuture channelFuture : channelFutures) {
                 final ChannelPipeline pipeline = channelFuture.channel().pipeline();
-                CUSTOM_HANDLER_MAP.forEach((name, initializer) -> pipeline.addLast(name, initializer));
+                CUSTOM_HANDLER_MAP.forEach(pipeline::addLast);
                 Bukkit.getLogger().info("Added custom handlers to connection pipeline.");
             }
             injected = true;
