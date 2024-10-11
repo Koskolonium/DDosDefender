@@ -3,12 +3,12 @@
 # How DDoSDefender Works.
 #
 # DDoSDefender works by intercepting a packet called the Login Start packet and reading it for the players name and the UUID (a client sends this packet when they want to connect to a minecraft server)
-# this packet is then placed in a queue (Customisable within the config.yml) then every second the 5 oldest packets (also customisable within the config.yml) are removed from the queue and are allowed to pass through to the server.
+# this packet is then placed in a queue (size customisable below then every second the 5 oldest packets (value also customisable below) are removed from the queue and are allowed to pass through to the server.
 # which ensures that a spike in traffic to the server will not affect the server's performance.
 #
 # DDoSDefender Also verifies players before they Join using the Minecraft api and puts verified players names in a text file, Invalid players get added to a different txt file.
-# This means that verified players essentially get a fast pass to the queue and invalid players will never get added to the queue saving space for valid traffic and ensures the main thread does not waste any resources processing bots.
-# however the Minecraft api does have a limit of how many requests can be made a minute, so to prevent this when 200 api requests have been within a minute all further unverified players will not be added to the queue and their connection to the server will be rejected.
+# This means that already verified players essentially get a fast pass to the queue and invalid players will never get added to the queue saving space for valid traffic and ensures the main thread does not waste any resources processing bots.
+# however the Minecraft api does have a limit of how many requests can be made a minute, so to prevent this when 200 api requests have been within a minute all further unverified players will get their connection to the server rejected and are told to try rejoining.
 #
 # Now in the circumstance where a lot of new bots and new players are trying to join this could make it quite difficult for new players to join because of the Minecraft api limit (as of now there is not anything that can be done about this).
 # But players who have already been verified will still be added to the queue as normal.
@@ -19,9 +19,9 @@
 # How to Set up DDoSDefender
 #
 # DDoSDefenders Default Config settings are perfect for SMPs, Such as using Feather However I highly recommend using TCPShield (TCPShield offers a free plan of up to 1TB of bandwidth per month) for properly hosted servers.
-# TCPShield's free plan and its pro plan already limits the connections per second to 5, so it is recommended to set your process limit to 3-4 and the que size to 15-16 within the config.yml when using these plans.
+# TCPShield's free plan and its pro plan already limits the connections per second to 5, so it is recommended to set your process limit to 3-4 and the que size to 15-16 below when using these plans.
 #
-# When using the Premium/Enterprise plan it is recommended to set the "Connections per second" to 50 within the TCPShields Mitigation settings.
+# When using the Premium/Enterprise plan it is recommended to set the "Connections per second" to 60 within the TCPShields Mitigation settings.
 # in this circumstance it is recommended to set your process limit to 40 and the que size to 200 within the config.yml
 #
 # However this is mainly for servers using BungeeCord and as of now this plugin is not tested on BungeeCord so try at your own expense.
@@ -30,3 +30,6 @@ queue:
   size: 25  # Maximum number of players that can wait in the connection queue
 process:
   limit: 5  # Number of player connections processed per second
+
+rate-limit_ips: true  # (true/false) Toggles Rate Limiting for Individual IP's. [Note For Feather Servers this Value will be internally set to false, this cannot be changed.]
+ratelimit_duration_seconds: 15  # Duration to rate limit an IP in seconds. [Highly recommended: Do not set this value below 10 seconds, For maximum protection I advise 60s. However, this will affect players if they leave and rejoin.]

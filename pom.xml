@@ -46,6 +46,7 @@
                                     <include>com.google.code.gson:*</include>
                                     <include>org.jetbrains.kotlin:*</include>
                                     <include>com.squareup.okio:*</include>
+                                    <include>org.bstats</include>
                                 </includes>
                                 <excludes>
                                     <exclude>org.spigotmc:spigot-api</exclude>
@@ -54,6 +55,14 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>16</source>
+                    <target>16</target>
+                </configuration>
             </plugin>
         </plugins>
 
@@ -146,6 +155,12 @@
             <groupId>com.squareup.okio</groupId>
             <artifactId>okio</artifactId>
             <version>3.3.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.bstats</groupId>
+            <artifactId>bstats-bukkit</artifactId>
+            <version>3.0.2</version>
+            <scope>compile</scope>
         </dependency>
     </dependencies>
 </project>
