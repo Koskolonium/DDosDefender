@@ -31,5 +31,8 @@ queue:
 process:
   limit: 5  # Number of player connections processed per second
 
-ratelimit_ips: true  # (true/false) Toggles Rate Limiting for Individual IP's. [Note For Feather Servers this Value will be internally set to false, this cannot be changed.]
-ratelimit_duration_seconds: 15  # Duration to rate limit an IP in seconds. [Highly recommended: Do not set this value below 10 seconds, For maximum protection I advise 60s. However, this will affect players if they leave and rejoin.]
+  rate-limit_ips: true  # (true/false) Toggles rate limiting for individual IPs.
+  # [Note: For Feather Servers, this value will be internally set to false; this cannot be changed.]
+  ratelimit_duration_seconds: 15  # Duration to rate limit an IP in seconds.
+  # [Highly recommended: Do not set this value below 10 seconds.
+  # For maximum protection, I advise 60 seconds.]
