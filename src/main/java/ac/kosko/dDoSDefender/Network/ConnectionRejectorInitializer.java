@@ -194,53 +194,102 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
         private void handlePlayerConnection(PacketEvent event) {
             Player player = event.getPlayer();
             String fullIp = getPlayerIp(player);
-            if (rateLimitIps) {
-                if (IGNORED_IP_ADDRESSES.contains(fullIp)) {
-                    return;
-                }
+            Bukkit.getLogger().info("Handling connection for player: " + player.getName() + " with IP: " + fullIp);
 
-                String network = getNetworkPortion(fullIp);
-                if (isNetworkBlocked(network)) {
-                    event.setCancelled(true);
-                    long remainingSeconds = getRemainingBlockTime(network);
-                    sendQueueMessage(player, MessageType.FREQUENT_REQUEST, remainingSeconds);
-                    return;
-                } else {
-                    blockNetworkTemporarily(network);
-                }
-            }
-
-            String playerName = player.getName().toLowerCase();
-
-            if (verifiedPlayerNames.containsKey(playerName)) {
-                enqueuePlayer(event, new LoginStartData(player.getName(), null));
+            // Extract login start data from the packet
+            LoginStartData loginStartData = extractLoginStartData(event.getPacket());
+            if (loginStartData == null) {
+                event.setCancelled(true);
+                Bukkit.getLogger().warning("Failed to extract login start data. Cancelling connection for player: " + player.getName());
                 return;
             }
 
+            String playerName = loginStartData.getPlayerName(); // Use the extracted player name
+            Bukkit.getLogger().info("Extracted player name: " + playerName);
+
+            if (rateLimitIps) {
+                if (IGNORED_IP_ADDRESSES.contains(fullIp)) {
+                    Bukkit.getLogger().info("IP " + fullIp + " is ignored. Skipping IP rate limiting.");
+                } else {
+                    String network = getNetworkPortion(fullIp);
+                    Bukkit.getLogger().info("Network portion: " + network);
+
+                    if (isNetworkBlocked(network)) {
+                        event.setCancelled(true);
+                        long remainingSeconds = getRemainingBlockTime(network);
+                        Bukkit.getLogger().info("Network " + network + " is blocked. Remaining block time: " + remainingSeconds);
+                        sendQueueMessage(player, MessageType.FREQUENT_REQUEST, remainingSeconds);
+                        return;
+                    } else {
+                        blockNetworkTemporarily(network);
+                        Bukkit.getLogger().info("Network " + network + " is not blocked, temporarily blocking it.");
+                    }
+                }
+            }
+
+            // Log the player name before processing
+            Bukkit.getLogger().info("Processing player: " + playerName);
+
+            // Validate player name
+            if (!isValidPlayerName(playerName)) {
+                Bukkit.getLogger().warning("Invalid player name detected: " + playerName);
+                event.setCancelled(true);
+                sendQueueMessage(player, MessageType.FAILED_VERIFICATION, 0);
+                return;
+            }
+
+            // Check if the player is verified
+            if (verifiedPlayerNames.containsKey(playerName)) {
+                Bukkit.getLogger().info("Player " + playerName + " is already verified.");
+                enqueuePlayer(event, loginStartData); // Use the extracted loginStartData
+                return;
+            }
+
+            // Check if the player is invalidated
             if (invalidatedPlayerNames.containsKey(playerName)) {
                 event.setCancelled(true);
+                Bukkit.getLogger().info("Player " + playerName + " is invalidated. Cancelling connection.");
                 sendQueueMessage(player, MessageType.BOT_DETECTED, 0);
                 return;
             }
 
+            // Check the verification counter
             int VERIFICATION_LIMIT_PER_MINUTE = 200;
             if (verificationCounter.get() >= VERIFICATION_LIMIT_PER_MINUTE) {
                 event.setCancelled(true);
+                Bukkit.getLogger().info("Verification limit reached. Cancelling connection for player " + playerName);
                 sendQueueMessage(player, MessageType.VERIFICATION_LIMIT_REACHED, 0);
                 return;
             }
 
-            LoginStartData loginStartData = new LoginStartData(player.getName(), null);
-            enqueuePlayer(event, loginStartData);
+            // New condition to call verifyPlayerUUID
+            if (!verifiedPlayerNames.containsKey(playerName) && !invalidatedPlayerNames.containsKey(playerName) && verificationCounter.get() < VERIFICATION_LIMIT_PER_MINUTE) {
+                verifyPlayerUUID(loginStartData, event); // Call the verification method
+                return;
+            }
+
+            Bukkit.getLogger().info("Enqueuing player " + playerName + " for verification.");
+            enqueuePlayer(event, loginStartData); // Use the extracted loginStartData
+        }
+
+        private boolean isValidPlayerName(String playerName) {
+            // Check if the player name is null or empty
+            if (playerName == null || playerName.isEmpty()) {
+                return false;
+            }
+            // Check for invalid characters (Minecraft usernames can only contain letters, numbers, and underscores)
+            return playerName.matches("^[a-zA-Z0-9_]{1,16}$");
         }
 
         private LoginStartData extractLoginStartData(PacketContainer packet) {
             try {
                 if (packet.getStrings().size() == 0) {
+                    Bukkit.getLogger().info("No player name found in packet.");
                     return null;
                 }
                 String playerName = packet.getStrings().read(0);
                 UUID playerUUID = packet.getUUIDs().size() > 0 ? packet.getUUIDs().read(0) : null;
+                Bukkit.getLogger().info("Extracted login start data: Name = " + playerName + ", UUID = " + playerUUID);
                 return new LoginStartData(playerName, playerUUID);
             } catch (Exception e) {
                 Bukkit.getLogger().warning("Failed to extract login start data: " + e.getMessage());
@@ -252,16 +301,16 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
             String playerName = data.getPlayerName();
             UUID packetUUID = data.getPlayerUUID();
             String url = "https://api.mojang.com/users/profiles/minecraft/" + playerName;
+            Bukkit.getLogger().info("Verifying player UUID for " + playerName + " using URL: " + url);
 
-            Request request = new Request.Builder()
-                    .url(url)
-                    .build();
+            Request request = new Request.Builder().url(url).build();
 
             try (Response response = httpClient.newCall(request).execute()) {
                 if (response.isSuccessful()) {
                     String body = Objects.requireNonNull(response.body()).string();
                     if (body.isEmpty()) {
                         event.setCancelled(true);
+                        Bukkit.getLogger().info("Empty response body for " + playerName + ". Verification failed.");
                         sendQueueMessage(event.getPlayer(), MessageType.FAILED_VERIFICATION, 0);
                         addInvalidatedPlayer(playerName);
                         return;
@@ -275,14 +324,17 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
                                         "$1-$2-$3-$4-$5"
                                 )
                         );
+                        Bukkit.getLogger().info("Fetched UUID for " + playerName + ": " + fetchedUUID);
 
                         if (packetUUID != null) {
                             if (fetchedUUID.equals(packetUUID)) {
                                 enqueuePlayer(event, data);
                                 addVerifiedPlayer(playerName);
                                 verificationCounter.incrementAndGet();
+                                Bukkit.getLogger().info("UUID verification successful for player " + playerName);
                             } else {
                                 event.setCancelled(true);
+                                Bukkit.getLogger().info("UUID mismatch for player " + playerName + ". Verification failed.");
                                 sendQueueMessage(event.getPlayer(), MessageType.FAILED_VERIFICATION, 0);
                                 addInvalidatedPlayer(playerName);
                             }
@@ -290,18 +342,22 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
                             enqueuePlayer(event, data);
                             addVerifiedPlayer(playerName);
                             verificationCounter.incrementAndGet();
+                            Bukkit.getLogger().info("No UUID in packet, but player " + playerName + " is verified.");
                         }
                     } else {
                         event.setCancelled(true);
+                        Bukkit.getLogger().info("Invalid Mojang response for player " + playerName + ". Verification failed.");
                         sendQueueMessage(event.getPlayer(), MessageType.FAILED_VERIFICATION, 0);
                         addInvalidatedPlayer(playerName);
                     }
                 } else if (response.code() == 204 || response.code() == 404) {
                     event.setCancelled(true);
+                    Bukkit.getLogger().info("Mojang API response error for player " + playerName + ". Bot detected.");
                     sendQueueMessage(event.getPlayer(), MessageType.BOT_DETECTED, 0);
                     addInvalidatedPlayer(playerName);
                 } else {
                     event.setCancelled(true);
+                    Bukkit.getLogger().info("Mojang API error for player " + playerName + ". Verification failed.");
                     sendQueueMessage(event.getPlayer(), MessageType.FAILED_VERIFICATION, 0);
                     addInvalidatedPlayer(playerName);
                 }
@@ -314,15 +370,18 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
         }
 
         private void enqueuePlayer(PacketEvent event, LoginStartData data) {
+            Bukkit.getLogger().info("Enqueuing player " + data.getPlayerName() + " for login start.");
             if (playerQueue.size() < maxQueueSize) {
                 int packetId = packetCounter.incrementAndGet();
                 packetData.put(packetId, data);
                 playerQueue.add(new QueuedPacket(event, packetId));
                 event.setCancelled(true);
                 packetCountInCurrentSecond.incrementAndGet();
+                Bukkit.getLogger().info("Player " + data.getPlayerName() + " added to the queue. Queue size: " + playerQueue.size());
             } else {
                 event.setCancelled(true);
                 sendQueueMessage(event.getPlayer(), MessageType.QUEUE_FULL, 0);
+                Bukkit.getLogger().info("Queue full. Player " + data.getPlayerName() + " cannot be added.");
             }
         }
 
@@ -335,6 +394,7 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
                 String message = getMessageByType(type, remainingSeconds);
                 disconnectPacket.getChatComponents().write(0, WrappedChatComponent.fromText(message));
                 ProtocolLibrary.getProtocolManager().sendServerPacket(player, disconnectPacket);
+                Bukkit.getLogger().info("Sent queue message to player " + player.getName() + ": " + message);
             } catch (Exception e) {
                 Bukkit.getLogger().severe("Error sending queue message: " + e.getMessage());
             }
