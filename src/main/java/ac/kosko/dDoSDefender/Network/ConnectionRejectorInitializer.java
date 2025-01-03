@@ -27,8 +27,7 @@ import java.nio.file.Files;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
@@ -66,12 +65,16 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
         private final File verifiedNamesFile;
         private final ConcurrentHashMap<String, Boolean> invalidatedPlayerNames = new ConcurrentHashMap<>();
         private final File invalidatedNamesFile;
+        private final File blacklistedIPsFile;
         private final AtomicInteger verificationCounter = new AtomicInteger();
         private final AtomicInteger invalidationCounter = new AtomicInteger();
         private BufferedWriter verifiedWriter;
         private BufferedWriter invalidatedWriter;
         private static final long TICK_INTERVAL = 20L;
         private boolean rateLimitIps;
+        private final ConcurrentHashMap<String, Long> blacklistedIPs = new ConcurrentHashMap<>();
+        private final ScheduledExecutorService rateLimitExecutor = Executors.newScheduledThreadPool(1);
+        private final ConcurrentHashMap<String, AtomicInteger> connectionCounts = new ConcurrentHashMap<>();
 
         public ConnectionRejector(JavaPlugin plugin) {
             this.plugin = plugin;
@@ -85,6 +88,9 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
             this.gson = new Gson();
             this.verifiedNamesFile = new File(plugin.getDataFolder(), "verified_players.txt");
             this.invalidatedNamesFile = new File(plugin.getDataFolder(), "invalidated_players.txt");
+            this.blacklistedIPsFile = new File(plugin.getDataFolder(), "BlackListedIPs.txt");
+            initializeBlacklistedIPsFile();
+            loadBlacklistedIPs();
             initializeFiles();
             loadPlayerNames();
             initializeWriters();
@@ -96,16 +102,57 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
             try {
                 if (!verifiedNamesFile.exists()) {
                     verifiedNamesFile.createNewFile();
-                    Bukkit.getLogger().info("Created verified_players.txt");
                 }
 
                 if (!invalidatedNamesFile.exists()) {
                     invalidatedNamesFile.createNewFile();
-                    Bukkit.getLogger().info("Created invalidated_players.txt");
                 }
             } catch (IOException e) {
-                Bukkit.getLogger().severe("Failed to initialize player files: " + e.getMessage());
             }
+        }
+
+        private void initializeBlacklistedIPsFile() {
+            try {
+                if (!blacklistedIPsFile.exists()) {
+                    blacklistedIPsFile.createNewFile();
+                }
+            } catch (IOException e) {
+                Bukkit.getLogger().severe("DDoSDefender: Failed to initialize BlackListedIPs file: " + e.getMessage());
+            }
+        }
+        private void loadBlacklistedIPs() {
+            try (BufferedReader reader = Files.newBufferedReader(blacklistedIPsFile.toPath())) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String trimmed = line.trim();
+                    if (!trimmed.isEmpty()) {
+                        blacklistedIPs.put(trimmed, System.currentTimeMillis());
+                    }
+                }
+            } catch (IOException e) {
+                Bukkit.getLogger().warning("DDoSDefender: Failed to load blacklisted IPs: " + e.getMessage());
+            }
+        }
+
+        private void monitorIp(String ip) {
+            connectionCounts.putIfAbsent(ip, new AtomicInteger(0));
+            AtomicInteger count = connectionCounts.get(ip);
+
+            count.incrementAndGet();
+
+            rateLimitExecutor.schedule(() -> {
+                int currentCount = count.get();
+                if (currentCount > 5) {
+                    blacklistedIPs.put(ip, System.currentTimeMillis());
+                    try (BufferedWriter writer = new BufferedWriter(new FileWriter(blacklistedIPsFile, true))) {
+                        writer.write(ip);
+                        writer.newLine();
+                    } catch (IOException e) {
+                        Bukkit.getLogger().severe("DDoSDefender: Failed to write to BlackListedIPs file: " + e.getMessage());
+                    }
+                }
+                connectionCounts.remove(ip);
+            }, 2000, TimeUnit.MILLISECONDS);
         }
 
         private void initializeWriters() {
@@ -113,7 +160,7 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
                 this.verifiedWriter = new BufferedWriter(new FileWriter(verifiedNamesFile, true));
                 this.invalidatedWriter = new BufferedWriter(new FileWriter(invalidatedNamesFile, true));
             } catch (IOException e) {
-                Bukkit.getLogger().severe("Failed to initialize file writers: " + e.getMessage());
+                Bukkit.getLogger().severe("DDoSDefender: Failed to initialize file writers: " + e.getMessage());
             }
         }
 
@@ -126,13 +173,13 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
             try (BufferedReader reader = Files.newBufferedReader(file.toPath())) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    String trimmed = line.trim().toLowerCase();
+                    String trimmed = line.trim();
                     if (!trimmed.isEmpty()) {
-                        map.put(trimmed, true);
+                        map.put(trimmed, true); // Keep original casing
                     }
                 }
             } catch (IOException e) {
-                Bukkit.getLogger().warning("Failed to load " + nameType + " player names: " + e.getMessage());
+                Bukkit.getLogger().warning("DDoSDefender: Failed to load " + nameType + " player names: " + e.getMessage());
             }
         }
 
@@ -194,105 +241,86 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
         private void handlePlayerConnection(PacketEvent event) {
             Player player = event.getPlayer();
             String fullIp = getPlayerIp(player);
-            Bukkit.getLogger().info("Handling connection for player: " + player.getName() + " with IP: " + fullIp);
+            if (!IGNORED_IP_ADDRESSES.contains(fullIp)) {
+                if (blacklistedIPs.containsKey(fullIp)) {
+                    event.setCancelled(true);
+                    return;
+                }
+                monitorIp(fullIp);
+            }
 
-            // Extract login start data from the packet
             LoginStartData loginStartData = extractLoginStartData(event.getPacket());
             if (loginStartData == null) {
                 event.setCancelled(true);
-                Bukkit.getLogger().warning("Failed to extract login start data. Cancelling connection for player: " + player.getName());
+                Bukkit.getLogger().warning("DDoSDefender: Failed to extract login start data. Cancelling connection for player: " + player.getName());
                 return;
             }
-
-            String playerName = loginStartData.getPlayerName(); // Use the extracted player name
-            Bukkit.getLogger().info("Extracted player name: " + playerName);
+            String playerName = loginStartData.getPlayerName();
 
             if (rateLimitIps) {
                 if (IGNORED_IP_ADDRESSES.contains(fullIp)) {
-                    Bukkit.getLogger().info("IP " + fullIp + " is ignored. Skipping IP rate limiting.");
                 } else {
                     String network = getNetworkPortion(fullIp);
-                    Bukkit.getLogger().info("Network portion: " + network);
 
                     if (isNetworkBlocked(network)) {
                         event.setCancelled(true);
                         long remainingSeconds = getRemainingBlockTime(network);
-                        Bukkit.getLogger().info("Network " + network + " is blocked. Remaining block time: " + remainingSeconds);
                         sendQueueMessage(player, MessageType.FREQUENT_REQUEST, remainingSeconds);
                         return;
                     } else {
                         blockNetworkTemporarily(network);
-                        Bukkit.getLogger().info("Network " + network + " is not blocked, temporarily blocking it.");
                     }
                 }
             }
+            Bukkit.getLogger().info("DDoSDefender: Handling connection for player: " + playerName);
 
-            // Log the player name before processing
-            Bukkit.getLogger().info("Processing player: " + playerName);
-
-            // Validate player name
             if (!isValidPlayerName(playerName)) {
-                Bukkit.getLogger().warning("Invalid player name detected: " + playerName);
                 event.setCancelled(true);
                 sendQueueMessage(player, MessageType.FAILED_VERIFICATION, 0);
                 return;
             }
 
-            // Check if the player is verified
             if (verifiedPlayerNames.containsKey(playerName)) {
-                Bukkit.getLogger().info("Player " + playerName + " is already verified.");
-                enqueuePlayer(event, loginStartData); // Use the extracted loginStartData
+                enqueuePlayer(event, loginStartData);
                 return;
             }
 
-            // Check if the player is invalidated
             if (invalidatedPlayerNames.containsKey(playerName)) {
                 event.setCancelled(true);
-                Bukkit.getLogger().info("Player " + playerName + " is invalidated. Cancelling connection.");
                 sendQueueMessage(player, MessageType.BOT_DETECTED, 0);
                 return;
             }
 
-            // Check the verification counter
             int VERIFICATION_LIMIT_PER_MINUTE = 200;
             if (verificationCounter.get() >= VERIFICATION_LIMIT_PER_MINUTE) {
                 event.setCancelled(true);
-                Bukkit.getLogger().info("Verification limit reached. Cancelling connection for player " + playerName);
                 sendQueueMessage(player, MessageType.VERIFICATION_LIMIT_REACHED, 0);
                 return;
             }
 
-            // New condition to call verifyPlayerUUID
             if (!verifiedPlayerNames.containsKey(playerName) && !invalidatedPlayerNames.containsKey(playerName) && verificationCounter.get() < VERIFICATION_LIMIT_PER_MINUTE) {
-                verifyPlayerUUID(loginStartData, event); // Call the verification method
+                verifyPlayerUUID(loginStartData, event);
                 return;
             }
-
-            Bukkit.getLogger().info("Enqueuing player " + playerName + " for verification.");
-            enqueuePlayer(event, loginStartData); // Use the extracted loginStartData
+            enqueuePlayer(event, loginStartData);
         }
 
         private boolean isValidPlayerName(String playerName) {
-            // Check if the player name is null or empty
             if (playerName == null || playerName.isEmpty()) {
                 return false;
             }
-            // Check for invalid characters (Minecraft usernames can only contain letters, numbers, and underscores)
             return playerName.matches("^[a-zA-Z0-9_]{1,16}$");
         }
 
         private LoginStartData extractLoginStartData(PacketContainer packet) {
             try {
                 if (packet.getStrings().size() == 0) {
-                    Bukkit.getLogger().info("No player name found in packet.");
                     return null;
                 }
                 String playerName = packet.getStrings().read(0);
                 UUID playerUUID = packet.getUUIDs().size() > 0 ? packet.getUUIDs().read(0) : null;
-                Bukkit.getLogger().info("Extracted login start data: Name = " + playerName + ", UUID = " + playerUUID);
                 return new LoginStartData(playerName, playerUUID);
             } catch (Exception e) {
-                Bukkit.getLogger().warning("Failed to extract login start data: " + e.getMessage());
                 return null;
             }
         }
@@ -301,8 +329,6 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
             String playerName = data.getPlayerName();
             UUID packetUUID = data.getPlayerUUID();
             String url = "https://api.mojang.com/users/profiles/minecraft/" + playerName;
-            Bukkit.getLogger().info("Verifying player UUID for " + playerName + " using URL: " + url);
-
             Request request = new Request.Builder().url(url).build();
 
             try (Response response = httpClient.newCall(request).execute()) {
@@ -310,7 +336,6 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
                     String body = Objects.requireNonNull(response.body()).string();
                     if (body.isEmpty()) {
                         event.setCancelled(true);
-                        Bukkit.getLogger().info("Empty response body for " + playerName + ". Verification failed.");
                         sendQueueMessage(event.getPlayer(), MessageType.FAILED_VERIFICATION, 0);
                         addInvalidatedPlayer(playerName);
                         return;
@@ -324,17 +349,14 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
                                         "$1-$2-$3-$4-$5"
                                 )
                         );
-                        Bukkit.getLogger().info("Fetched UUID for " + playerName + ": " + fetchedUUID);
 
                         if (packetUUID != null) {
                             if (fetchedUUID.equals(packetUUID)) {
                                 enqueuePlayer(event, data);
                                 addVerifiedPlayer(playerName);
                                 verificationCounter.incrementAndGet();
-                                Bukkit.getLogger().info("UUID verification successful for player " + playerName);
                             } else {
                                 event.setCancelled(true);
-                                Bukkit.getLogger().info("UUID mismatch for player " + playerName + ". Verification failed.");
                                 sendQueueMessage(event.getPlayer(), MessageType.FAILED_VERIFICATION, 0);
                                 addInvalidatedPlayer(playerName);
                             }
@@ -342,22 +364,18 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
                             enqueuePlayer(event, data);
                             addVerifiedPlayer(playerName);
                             verificationCounter.incrementAndGet();
-                            Bukkit.getLogger().info("No UUID in packet, but player " + playerName + " is verified.");
                         }
                     } else {
                         event.setCancelled(true);
-                        Bukkit.getLogger().info("Invalid Mojang response for player " + playerName + ". Verification failed.");
                         sendQueueMessage(event.getPlayer(), MessageType.FAILED_VERIFICATION, 0);
                         addInvalidatedPlayer(playerName);
                     }
                 } else if (response.code() == 204 || response.code() == 404) {
                     event.setCancelled(true);
-                    Bukkit.getLogger().info("Mojang API response error for player " + playerName + ". Bot detected.");
                     sendQueueMessage(event.getPlayer(), MessageType.BOT_DETECTED, 0);
                     addInvalidatedPlayer(playerName);
                 } else {
                     event.setCancelled(true);
-                    Bukkit.getLogger().info("Mojang API error for player " + playerName + ". Verification failed.");
                     sendQueueMessage(event.getPlayer(), MessageType.FAILED_VERIFICATION, 0);
                     addInvalidatedPlayer(playerName);
                 }
@@ -365,23 +383,19 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
                 event.setCancelled(true);
                 sendQueueMessage(event.getPlayer(), MessageType.FAILED_VERIFICATION, 0);
                 addInvalidatedPlayer(playerName);
-                Bukkit.getLogger().warning("Failed to verify player " + playerName + ": " + e.getMessage());
             }
         }
 
         private void enqueuePlayer(PacketEvent event, LoginStartData data) {
-            Bukkit.getLogger().info("Enqueuing player " + data.getPlayerName() + " for login start.");
             if (playerQueue.size() < maxQueueSize) {
                 int packetId = packetCounter.incrementAndGet();
                 packetData.put(packetId, data);
                 playerQueue.add(new QueuedPacket(event, packetId));
                 event.setCancelled(true);
                 packetCountInCurrentSecond.incrementAndGet();
-                Bukkit.getLogger().info("Player " + data.getPlayerName() + " added to the queue. Queue size: " + playerQueue.size());
             } else {
                 event.setCancelled(true);
                 sendQueueMessage(event.getPlayer(), MessageType.QUEUE_FULL, 0);
-                Bukkit.getLogger().info("Queue full. Player " + data.getPlayerName() + " cannot be added.");
             }
         }
 
@@ -394,9 +408,8 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
                 String message = getMessageByType(type, remainingSeconds);
                 disconnectPacket.getChatComponents().write(0, WrappedChatComponent.fromText(message));
                 ProtocolLibrary.getProtocolManager().sendServerPacket(player, disconnectPacket);
-                Bukkit.getLogger().info("Sent queue message to player " + player.getName() + ": " + message);
             } catch (Exception e) {
-                Bukkit.getLogger().severe("Error sending queue message: " + e.getMessage());
+                Bukkit.getLogger().severe("DDoSDefender: Error sending queue message: " + e.getMessage());
             }
         }
 
@@ -433,7 +446,7 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
                             ProtocolLibrary.getProtocolManager().receiveClientPacket(packetEvent.getPlayer(), packet, false);
                             processedCount++;
                         } catch (Exception e) {
-                            Bukkit.getLogger().warning("Failed to process packet for player " + data.getPlayerName() + ": " + e.getMessage());
+                            Bukkit.getLogger().warning("DDoSDefender: Failed to process packet for player " + data.getPlayerName() + ": " + e.getMessage());
                         }
                     }
                 }
@@ -447,7 +460,7 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
         private void resetAndWarnPacketCount() {
             int count = packetCountInCurrentSecond.getAndSet(0);
             if (count > 150) {
-                Bukkit.getLogger().warning("⚠️ High Traffic Detected: more than 150 connection requests received in 1 Second. ⚠️");
+                Bukkit.getLogger().warning("⚠️ DDoSDefender: High Traffic Detected!! ⚠️");
                 sendQueueMessage = false;
             } else {
                 sendQueueMessage = true;
@@ -467,6 +480,10 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
         }
 
         private String getNetworkPortion(String ip) {
+            String[] parts = ip.split("\\.");
+            if (parts.length >= 3) {
+                return parts[0] + "." + parts[1] + "." + parts[2];
+            }
             return ip;
         }
 
@@ -498,32 +515,30 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
         }
 
         private void addVerifiedPlayer(String playerName) {
-            String lowerCaseName = playerName.toLowerCase();
-            if (verifiedPlayerNames.putIfAbsent(lowerCaseName, true) == null) {
+            if (verifiedPlayerNames.putIfAbsent(playerName, true) == null) {
                 try {
-                    verifiedWriter.write(lowerCaseName);
+                    verifiedWriter.write(playerName);
                     verifiedWriter.newLine();
                     verifiedWriter.flush();
                 } catch (IOException e) {
-                    Bukkit.getLogger().severe("Failed to add verified player " + playerName + ": " + e.getMessage());
+                    Bukkit.getLogger().severe("DDoSDefender: Failed to add verified player " + playerName + ": " + e.getMessage());
                 }
             }
         }
 
         private void addInvalidatedPlayer(String playerName) {
-            String lowerCaseName = playerName.toLowerCase();
-            if (invalidatedPlayerNames.putIfAbsent(lowerCaseName, true) == null) {
+            if (invalidatedPlayerNames.putIfAbsent(playerName, true) == null) {
                 try {
-                    invalidatedWriter.write(lowerCaseName);
+                    invalidatedWriter.write(playerName); // Keep original casing
                     invalidatedWriter.newLine();
                     invalidatedWriter.flush();
                 } catch (IOException e) {
-                    Bukkit.getLogger().severe("Failed to add invalidated player " + playerName + ": " + e.getMessage());
+                    Bukkit.getLogger().severe("DDoSDefender: Failed to add invalidated player " + playerName + ": " + e.getMessage());
                 }
             }
             int currentCount = invalidationCounter.incrementAndGet();
             if (currentCount >= 40) {
-                Bukkit.getLogger().warning("⚠️ **DDoSDefender Successfully Mitigated a Bot Attack!** ⚠️");
+                Bukkit.getLogger().warning("⚠️ **DDoSDefender: Successfully Mitigated a Bot Attack!** ⚠️");
                 invalidationCounter.set(0);
             }
         }
