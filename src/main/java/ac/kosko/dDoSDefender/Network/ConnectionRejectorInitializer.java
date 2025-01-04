@@ -45,15 +45,13 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
     }
 
     static class ConnectionRejector extends ChannelInboundHandlerAdapter {
-
+        @Setter
+        @Getter
         private final JavaPlugin plugin;
         private final ConcurrentLinkedQueue<QueuedPacket> playerQueue = new ConcurrentLinkedQueue<>();
         private final AtomicInteger packetCounter = new AtomicInteger();
         private final ConcurrentHashMap<Integer, LoginStartData> packetData = new ConcurrentHashMap<>();
         private final AtomicInteger packetCountInCurrentSecond = new AtomicInteger();
-
-        @Setter
-        @Getter
         private boolean sendQueueMessage = true;
         private final int maxQueueSize;
         private final int processLimit;
