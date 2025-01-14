@@ -24,9 +24,7 @@ import io.netty.channel.ChannelPipeline;
 
 import java.io.*;
 import java.nio.file.Files;
-import java.util.Objects;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -69,17 +67,20 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
         private BufferedWriter verifiedWriter;
         private BufferedWriter invalidatedWriter;
         private static final long TICK_INTERVAL = 20L;
-        private boolean rateLimitIps;
+        private final boolean rateLimitIps;
         private final ConcurrentHashMap<String, Long> blacklistedIPs = new ConcurrentHashMap<>();
         private final ScheduledExecutorService rateLimitExecutor = Executors.newScheduledThreadPool(1);
         private final ConcurrentHashMap<String, AtomicInteger> connectionCounts = new ConcurrentHashMap<>();
+        private final Set<String> additionalIgnoredIPs = new HashSet<>();
 
         public ConnectionRejector(JavaPlugin plugin) {
             this.plugin = plugin;
             this.maxQueueSize = plugin.getConfig().getInt("queue.size", 40);
             this.processLimit = plugin.getConfig().getInt("process.limit", 8);
-            this.blockDurationMs = plugin.getConfig().getLong("ratelimit_duration_seconds", 15) * 1000;
+            this.blockDurationMs = plugin.getConfig().getInt("ratelimit_duration_seconds", 15) * 1000L;
             this.rateLimitIps = plugin.getConfig().getBoolean("rate-limit_ips", true);
+            List<String> ignoredIpsFromConfig = plugin.getConfig().getStringList("ignored_ips");
+            additionalIgnoredIPs.addAll(ignoredIpsFromConfig);
             this.httpClient = new OkHttpClient.Builder()
                     .callTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                     .build();
@@ -197,7 +198,6 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
         }
 
         private static final Set<String> IGNORED_IP_ADDRESSES = Set.of(
-                "127.0.0.1",
                 "198.178.119.0",
                 "104.234.6.0",
                 "51.161.19.224",
@@ -235,11 +235,15 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
                 "212.102.60.221",
                 "149.102.229.10"
         );
+        private boolean isIgnoredIp(String ip) {
+            return IGNORED_IP_ADDRESSES.contains(ip) || additionalIgnoredIPs.contains(ip);
+        }
 
         private void handlePlayerConnection(PacketEvent event) {
             Player player = event.getPlayer();
             String fullIp = getPlayerIp(player);
-            if (!IGNORED_IP_ADDRESSES.contains(fullIp)) {
+
+            if (!isIgnoredIp(fullIp)) {
                 if (blacklistedIPs.containsKey(fullIp)) {
                     event.setCancelled(true);
                     return;
@@ -256,7 +260,7 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
             String playerName = loginStartData.getPlayerName();
 
             if (rateLimitIps) {
-                if (IGNORED_IP_ADDRESSES.contains(fullIp)) {
+                if (isIgnoredIp(fullIp)) {
                 } else {
                     String network = getNetworkPortion(fullIp);
 
@@ -270,6 +274,7 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
                     }
                 }
             }
+
             Bukkit.getLogger().info("DDoSDefender: Handling connection for player: " + playerName);
 
             if (!isValidPlayerName(playerName)) {
@@ -300,6 +305,7 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
                 verifyPlayerUUID(loginStartData, event);
                 return;
             }
+
             enqueuePlayer(event, loginStartData);
         }
 
@@ -307,7 +313,8 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
             if (playerName == null || playerName.isEmpty()) {
                 return false;
             }
-            return playerName.matches("^[a-zA-Z0-9_]{1,16}$");
+            boolean isValid = playerName.matches("^[a-zA-Z0-9_]{1,16}$");
+            return isValid;
         }
 
         private LoginStartData extractLoginStartData(PacketContainer packet) {
@@ -373,14 +380,10 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
                     sendQueueMessage(event.getPlayer(), MessageType.BOT_DETECTED, 0);
                     addInvalidatedPlayer(playerName);
                 } else {
-                    event.setCancelled(true);
-                    sendQueueMessage(event.getPlayer(), MessageType.FAILED_VERIFICATION, 0);
-                    addInvalidatedPlayer(playerName);
+                    enqueuePlayer(event, data);
                 }
             } catch (IOException e) {
-                event.setCancelled(true);
-                sendQueueMessage(event.getPlayer(), MessageType.FAILED_VERIFICATION, 0);
-                addInvalidatedPlayer(playerName);
+                enqueuePlayer(event, data);
             }
         }
 
@@ -415,17 +418,17 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
             String prefix = ChatColor.BLUE + "[DDoSDefender] " + ChatColor.RESET;
             return switch (type) {
                 case FREQUENT_REQUEST ->
-                        prefix + ChatColor.DARK_BLUE + "Your network is being rate limited. Please wait "
-                                + ChatColor.BLUE + remainingSeconds + " seconds " + ChatColor.DARK_BLUE + "before trying again.";
+                        prefix + ChatColor.WHITE + "Your network is being rate limited. Please wait "
+                                + ChatColor.WHITE + remainingSeconds + " seconds " + ChatColor.WHITE + "before trying again.";
                 case QUEUE_FULL ->
-                        prefix + ChatColor.DARK_BLUE + "The queue is currently full. Please try again later.";
+                        prefix + ChatColor.WHITE + "The queue is currently full. Please try again later.";
                 case BOT_DETECTED ->
-                        prefix + ChatColor.DARK_BLUE + "Bot activity detected. Your connection has been rejected.";
+                        prefix + ChatColor.WHITE + "Bot activity detected. Your connection has been rejected.";
                 case FAILED_VERIFICATION ->
-                        prefix + ChatColor.DARK_BLUE + "Failed to verify your account. Connection has been rejected.";
+                        prefix + ChatColor.WHITE + "Failed to verify your account. Connection has been rejected.";
                 case VERIFICATION_LIMIT_REACHED ->
-                        prefix + ChatColor.DARK_BLUE + "Verification limit reached. Please try connecting again shortly.";
-                default -> prefix + ChatColor.DARK_BLUE + "Connection rejected.";
+                        prefix + ChatColor.WHITE + "Verification limit reached. Please try connecting again shortly.";
+                default -> prefix + ChatColor.WHITE + "Connection rejected.";
             };
         }
 
@@ -502,7 +505,7 @@ public class ConnectionRejectorInitializer extends ChannelInitializer<Channel> {
             if (unblockTime == null) {
                 return 0;
             }
-            long remaining = (unblockTime - System.currentTimeMillis()) / 1000;
+            long remaining = Math.round((unblockTime - System.currentTimeMillis()) / 1000.0);
             return remaining > 0 ? remaining : 0;
         }
 

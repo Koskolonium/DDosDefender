@@ -61,9 +61,30 @@ queue:
 process:
   limit: 3  # Number of player connections processed per second
 
-  rate-limit_ips: true  # (true/false) Toggles rate limiting for individual IPs.
+rate-limit:
+  ips: true  # (true/false) Toggles rate limiting for individual IPs.
   # [Note: For Feather Servers, this value will be internally set to false; this cannot be changed.]
 
-  ratelimit_duration_seconds: 15  # Duration to rate limit an IP in seconds.
+  duration_seconds: 15  # Duration to rate limit an IP in seconds.
   # [Highly recommended: Do not set this value below 10 seconds.
   # For maximum protection, I advise 60 seconds.]
+
+ignored_ips:
+  - "127.0.0.1"
+
+# This section allows administrators to add the server's IP address(es) to prevent DDoSDefender
+# from rate-limiting connections server wide. Server wide rate limiting can occur if the server does not properly forward
+# the IP addresses of players connecting to it.
+#
+# Common scenarios where this might happen include:
+# - Players connecting from "127.0.0.1" (loopback address), which indicates a local connection.
+# - Players connecting from the actual IP address of the server, which can occur in certain
+#   configurations, such as when using Cloudflare or similar services.
+#
+# If you notice that the entire server is being rate-limited, resulting in players experiencing
+# difficulties joining due to constant rate-limiting, please add the server's IP address(es)
+# below to ensure they are exempt from this restriction.
+#
+# It is also important to note that if this is the case then it is likely that there is an error with how you have set up the server.
+# If this happens then you will be unable to ip-ban as it would result in ip banning everyone.
+# However, feather servers are an exception as they usually don't forward the ips of players connecting, instead replacing it with "127.0.0.1"

@@ -1,36 +1,90 @@
-# Thank you for using DDoSDefender, This file is Dedicated to informing System Administrators on how DDoSDefender works and how to set it up correctly
+# Thank you for using DDoSDefender!
+# This file is dedicated to informing System Administrators on how DDoSDefender works and how to set it up correctly.
+# (Note: This version of DDoSDefender is made for individual servers and not for Bungeecord/Waterfall.)
+
+# How DDoSDefender Works
 #
-# How DDoSDefender Works.
+# DDoSDefender operates by injecting custom network handlers within the network pipeline.
+# The network pipeline is a series of handlers that process network packets as they are received and sent.
 #
-# DDoSDefender works by intercepting a packet called the Login Start packet and reading it for the player name and the UUID (a client sends this packet when they want to connect to a Minecraft server)
-# This packet is then placed in a queue (size customisable below). Every second, the 5 oldest packets (value also customisable below) are removed from the queue and allowed to pass through to the server.
-# which ensures that a spike in traffic to the server will not affect the server's performance.
+# These custom handlers intercept a packet called 'Login Start', which is sent when a client wants to connect to the server.
+# This interception occurs in the network threads, meaning the main thread is not affected by any processing done here.
 #
-# DDoSDefender also verifies players before they Join using the Minecraft API and puts verified players' names in a text file. Invalid players get added to a different text file.
-# This means that already verified players essentially get a fast pass to the queue and invalid players will never get added to the queue saving space for valid traffic and ensuring the main thread does not waste any resources processing bots.
-# However, the Minecraft API does have a limit on how many requests can be made in a minute. To prevent this, when 200 API requests have been made within a minute, all further unverified players will have their connection to the server rejected and be told to try rejoining.
+# The Login Start packet contains the player's name and UUID, which we later use to authenticate the account using the Minecraft API.
+# This authentication occurs again after the network steps if the server administrator does not have cracked mode enabled.
 #
-# DDosDefender also rate limits connection requests from the same IP to help prevent DOS/bot attacks.
-# In addition, DDoSDefender provides logs when it prevents 20 bots from joining to help inform Administrators of Bot attacks,
+# DDoSDefender authenticates players using the Minecraft API to prevent the main thread from wasting resources on verifying bots,
+# which can be CPU intensive, especially during a bot attack.
 #
-# How to Set up DDoSDefender
+# Once the 'Login Start' packet is received, we rate limit that IP (meaning all connection requests from this IP will be immediately declined)
+# for a customizable duration (ratelimit_duration_seconds:).
 #
-# DDoSDefender's Default Config settings are perfect for SMPs, Such as using Feather However I highly recommend using TCPShield (TCPShield offers a free plan of up to 1TB of bandwidth per month) for properly hosted servers.
-# TCPShield's free plan and its pro plan already limit the connections per second to 5, so it is recommended to set your process limit to 3-4 and the queue size to 15-16 below when using these plans.
+# **Work In Progress:** DDoSDefender also monitors the rate-limited IP for 2 seconds to see if 5 'Login Start' packets have been received
+# from that IP within this 2-second period. If so, the IP will be banned, effectively auto-punishing IPs attempting to bot the server.
 #
-# When using the Premium/Enterprise plan it is recommended to set the "Connections per second" to 60 within the TCPShields Mitigation settings.
-# In this circumstance it is recommended to set your process limit to 40 and the queue size to 200 within the config.yml
+# At this point in the network chain, DDoSDefender begins verifying players using the Minecraft API mentioned above.
+# Verified players will have their names added to a VerifiedPlayers.txt file, while invalid players will be added to an InvalidatedPlayers.txt file.
 #
-# However this is mainly for servers using BungeeCord and as of now this plugin is not tested on BungeeCord so try at your own expense.
+# This system creates a 'Fast Pass' for verified players, allowing them to skip the verification step every time they join in the future.
+# The files are also written to memory on startup, significantly speeding up the verification process for returning players.
+#
+# DDoSDefender accounts for the 200 requests per minute limit to the Minecraft API. Once 200 requests have been made in a minute,
+# all unverified players attempting to connect will have their connection requests canceled and will be informed to try again later.
+# However, if a player has been verified in the past, they will still be able to connect to the server due to the Fast Pass.
+#
+# If a player passes all verification steps, they will be added to a queue (size configurable below).
+# Every second, the 3 oldest players in the queue (quantity also configurable below) will be allowed to pass through to the server.
+
+# How to Set Up DDoSDefender
+#
+# DDoSDefender's default configuration settings are ideal for the majority of small to medium servers,
+# such as private school Minecraft servers or Feather servers.
+#
+# Recommended settings based on average player count:
+# - For servers with an average player count of 0-50:
+#   - Queue size: 15
+#   - Process limit: 3
+# - For servers with an average player count of 50-150:
+#   - Queue size: 25
+#   - Process limit: 5
+# - For servers with an average player count of 150-300:
+#   - Queue size: 50
+#   - Process limit: 10
+#
+# For large servers or servers that use a proxy service like Bungeecord,
+# we highly recommend using the Bungeecord version only (a Waterfall version is being worked on)
+# and not using this version for the backend servers.
 
 queue:
-  size: 25  # Maximum number of players that can wait in the connection queue
-process:
-  limit: 5  # Number of player connections processed per second
+  size: 15  # Maximum number of players that can wait in the connection queue
 
-  rate-limit_ips: true  # (true/false) Toggles rate limiting for individual IPs.
+process:
+  limit: 3  # Number of player connections processed per second
+
+rate-limit:
+  ips: true  # (true/false) Toggles rate limiting for individual IPs.
   # [Note: For Feather Servers, this value will be internally set to false; this cannot be changed.]
-  ratelimit_duration_seconds: 15  # Duration to rate limit an IP in seconds.
+
+  duration_seconds: 15  # Duration to rate limit an IP in seconds.
   # [Highly recommended: Do not set this value below 10 seconds.
   # For maximum protection, I advise 60 seconds.]
 
+ignored_ips:
+  - "127.0.0.1"
+
+# This section allows administrators to add the server's IP address(es) to prevent DDoSDefender
+# from rate-limiting connections server wide. Server wide rate limiting can occur if the server does not properly forward
+# the IP addresses of players connecting to it.
+#
+# Common scenarios where this might happen include:
+# - Players connecting from "127.0.0.1" (loopback address), which indicates a local connection.
+# - Players connecting from the actual IP address of the server, which can occur in certain
+#   configurations, such as when using Cloudflare or similar services.
+#
+# If you notice that the entire server is being rate-limited, resulting in players experiencing
+# difficulties joining due to constant rate-limiting, please add the server's IP address(es)
+# below to ensure they are exempt from this restriction.
+#
+# It is also important to note that if this is the case then it is likely that there is an error with how you have set up the server.
+# If this happens then you will be unable to ip-ban as it would result in ip banning everyone.
+# However, feather servers are an exception as they usually don't forward the ips of players connecting, instead replacing it with "127.0.0.1"
